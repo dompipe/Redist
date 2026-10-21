@@ -41,6 +41,7 @@ final class SqliteStore {
             position INTEGER NOT NULL,
             payload_json TEXT NOT NULL,
             priority INTEGER NOT NULL DEFAULT 0 CHECK(priority IN (0,1)),
+            defer_until_wave INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'queued',
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -50,7 +51,11 @@ final class SqliteStore {
         $hasPriority = false;
         foreach ($columns as $column) if (($column['name'] ?? '') === 'priority') $hasPriority = true;
         if (!$hasPriority) $db->exec('ALTER TABLE queue_entries ADD COLUMN priority INTEGER NOT NULL DEFAULT 0');
+        $hasDeferUntilWave = false;
+        foreach ($columns as $column) if (($column['name'] ?? '') === 'defer_until_wave') $hasDeferUntilWave = true;
+        if (!$hasDeferUntilWave) $db->exec('ALTER TABLE queue_entries ADD COLUMN defer_until_wave INTEGER NOT NULL DEFAULT 0');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_queue_status_priority_position ON queue_entries(status, priority, position)');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_queue_status_defer_position ON queue_entries(status, defer_until_wave, position)');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_queue_status_position ON queue_entries(status, position)');
         $db->exec("CREATE TABLE IF NOT EXISTS user_logs (
             log_key TEXT PRIMARY KEY,
