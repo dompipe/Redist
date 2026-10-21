@@ -2,8 +2,8 @@
 
 namespace Redist\curl;
 
-include 'pcurls.php';
-include 'curl.php';
+require_once __DIR__ . '/pcurls.php';
+require_once __DIR__ . '/curl.php';
 
 class static_curls extends curl implements pCurls {
 

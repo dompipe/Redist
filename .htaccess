@@ -1,0 +1,12 @@
+# Redist optional front-controller routing.
+# Default is OFF. Change this value to on to route incoming URLs through index.php.
+# Requires Apache mod_rewrite and AllowOverride FileInfo (or All).
+SetEnvIf Request_URI "^" REDIST_FRONT_CONTROLLER=off
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^index\.php$ - [END]
+    RewriteRule ^Redist/captcha/numeric\.php$ - [END,NC]
+    RewriteCond %{ENV:REDIST_FRONT_CONTROLLER} ^on$ [NC]
+    RewriteRule ^ index.php [END,QSA,E=REDIST_ORIGINAL_PATH:%{REQUEST_URI}]
+</IfModule>
