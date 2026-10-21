@@ -26,7 +26,7 @@ function redistCaptchaNewCode(): string {
     for ($i = 0; $i < 4; $i++) $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
     return $code;
 }
-function redistCaptchaEnsure(): void {
+function redistCaptchaEnsure(string $scope = ''): void {
     if (!isset($_SESSION['redist_numeric_captcha']) || !is_array($_SESSION['redist_numeric_captcha'])) {
         $_SESSION['redist_numeric_captcha'] = [
             'answer' => redistCaptchaNewCode(),
@@ -35,6 +35,7 @@ function redistCaptchaEnsure(): void {
             'attempts' => 0,
             'passed' => false,
             'nonce' => bin2hex(random_bytes(16)),
+            'scope' => $scope,
         ];
     }
 }
@@ -46,6 +47,7 @@ function redistCaptchaFreshRound(): void {
         'attempts' => 0,
         'passed' => false,
         'nonce' => bin2hex(random_bytes(16)),
+        'scope' => (string)($_SESSION['redist_numeric_captcha']['scope'] ?? ''),
     ];
 }
 function redistCaptchaImage(int $frame): never {
@@ -111,7 +113,22 @@ $mode = (string)($_GET['mode'] ?? 'page');
 if ($mode === 'frame') redistCaptchaImage((int)($_GET['frame'] ?? 0));
 if ($mode !== 'page') { http_response_code(404); exit; }
 
-redistCaptchaEnsure();
+// The challenge pass is scoped to the exact section and path that requested it.
+$sectionScope = (string)($_GET['section'] ?? '');
+$pathScope = (string)($_GET['path'] ?? '');
+if (!preg_match('/^[a-z0-9][a-z0-9._:-]{0,159}$/', $sectionScope)
+    || $pathScope === '' || $pathScope[0] !== '/' || str_starts_with($pathScope, '//')
+    || preg_match('/[\\r\\n]/', $pathScope)) {
+    http_response_code(400);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('A valid Redist section and path are required.');
+}
+$requestedScope = hash('sha256', $sectionScope . "\n" . $pathScope);
+$currentState = $_SESSION['redist_numeric_captcha'] ?? null;
+if (is_array($currentState) && !hash_equals((string)($currentState['scope'] ?? ''), $requestedScope)) {
+    unset($_SESSION['redist_numeric_captcha']);
+}
+redistCaptchaEnsure($requestedScope);
 $state = $_SESSION['redist_numeric_captcha'];
 $message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -129,12 +146,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             unset($_SESSION['redist_numeric_captcha']);
             http_response_code(429);
             $message = 'Too many attempts. Restart the challenge after a short pause.';
-            redistCaptchaEnsure();
+            redistCaptchaEnsure($requestedScope);
         } elseif (hash_equals((string)$state['answer'], (string)$answer)) {
             $round = (int)$state['round'];
             if ($round >= redistCaptchaRounds()) {
                 $_SESSION['redist_numeric_captcha']['passed'] = true;
                 $_SESSION['redist_numeric_captcha']['passed_at'] = time();
+                $_SESSION['redist_numeric_captcha']['passed_scope'] = (string)($state['scope'] ?? '');
                 $message = 'Challenge complete. Redist may now grant normal queue priority.';
             } else {
                 redistCaptchaFreshRound();
@@ -178,7 +196,7 @@ button[type=submit]{width:100%;margin-top:.7rem;background:#1c2735;color:white;b
 <p class="message">Verification passed for this session. The Redist gate must check the server-side session flag before allowing normal priority.</p>
 <?php else: ?>
 <p class="hint">Round <?=$round?> of <?=redistCaptchaRounds()?>. Codes expire after five minutes.</p>
-<form method="post" action="?mode=page" autocomplete="off">
+<form method="post" action="?mode=page&amp;section=<?=rawurlencode($sectionScope)?>&amp;path=<?=rawurlencode($pathScope)?>" autocomplete="off">
 <input type="hidden" name="nonce" value="<?=$nonce?>">
 <label for="answer">Numeric code</label>
 <input id="answer" name="answer" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required autocomplete="off">
@@ -194,7 +212,8 @@ button[type=submit]{width:100%;margin-top:.7rem;background:#1c2735;color:white;b
  const input = document.getElementById('answer');
  let n = 0;
  // Eight actual GD-rendered frames; the answer remains stable across the animation.
- setInterval(() => { n = (n + 1) % 8; frame.src = '?mode=frame&frame=' + n + '&t=' + Date.now(); }, 180);
+ const scopeQuery = '&section=' + encodeURIComponent(<?=json_encode($sectionScope, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)?>) + '&path=' + encodeURIComponent(<?=json_encode($pathScope, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)?>);
+ setInterval(() => { n = (n + 1) % 8; frame.src = '?mode=frame&frame=' + n + scopeQuery + '&t=' + Date.now(); }, 180);
  document.querySelectorAll('[data-digit]').forEach(b => b.addEventListener('click', () => {
    if (input.value.length < 4) input.value += b.dataset.digit;
    input.focus();
