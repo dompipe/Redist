@@ -83,6 +83,8 @@ final class BehavioralIntelligence {
         $b->execute([$section]); $base=$b->fetchColumn();
         $baseline=$base===false?30.0:max(1,(float)$base);
         $ratio=$rate/$baseline;
+        $sectionQ=$db->prepare('SELECT COUNT(*) AS events,COUNT(DISTINCT actor_key) AS actors,COUNT(DISTINCT route_key) AS routes FROM behavior_events WHERE section_id=? AND observed_at>=?');
+        $sectionQ->execute([$section,$since]); $sectionStats=$sectionQ->fetch() ?: ['events'=>0,'actors'=>0,'routes'=>0];
         $entropy=0.0; $k=count($routes);
         if($n>1 && $k>1) {
             foreach($routes as $c) { $p=$c/$n; $entropy-=$p*log($p,2); }
@@ -99,6 +101,8 @@ final class BehavioralIntelligence {
         $score=min(100,$score);
         return ['section_id'=>$section,'events'=>$n,'requests_per_minute'=>round($rate,2),
             'baseline_per_minute'=>round($baseline,2),'rate_ratio'=>round($ratio,2),
+            'section_wide_events_15m'=>(int)$sectionStats['events'],'section_wide_sessions_15m'=>(int)$sectionStats['actors'],
+            'section_wide_routes_15m'=>(int)$sectionStats['routes'],
             'route_entropy'=>round($entropy,3),'unique_routes'=>$k,'engagement_events'=>$engagement,
             'mean_dwell_ms'=>$mean===null?null:(int)round($mean),'risk_score'=>$score,
             'recommendation'=>$score>=65?'challenge':($score>=40?'mitigate':'allow'),
