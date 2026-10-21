@@ -1,7 +1,6 @@
 <?php
-namespace Redist\\storage;
+namespace Redist\storage;
 
-use DateTimeImmutable;
 use PDO;
 use RuntimeException;
 
@@ -44,7 +43,7 @@ final class SectionHealth {
         $sectionId = trim($sectionId);
         if ($sectionId === '' || strlen($sectionId) > 200) throw new RuntimeException('sectionId must be 1-200 characters.');
         if ($failureThreshold < 1 || $failureThreshold > 1000) throw new RuntimeException('failureThreshold must be between 1 and 1000.');
-        $at = $observedAt ?: gmdate('Y-m-d\\TH:i:s\\Z');
+        $at = $observedAt ?: gmdate('Y-m-d\TH:i:s\Z');
         $success = $httpCode !== null && $httpCode >= 200 && $httpCode < 300 && ($error === null || $error === '');
         $db = SqliteStore::db();
         self::schema($db);
@@ -82,7 +81,7 @@ final class SectionHealth {
                 }
             }
             $db->commit();
-        } catch (\\Throwable $e) {
+        } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
