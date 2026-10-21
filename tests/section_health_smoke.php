@@ -4,8 +4,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../Redist/storage/SqliteStore.php';
 require_once __DIR__ . '/../Redist/storage/SectionHealth.php';
 
-use Redist\\storage\\SqliteStore;
-use Redist\\storage\\SectionHealth;
+use Redist\storage\SqliteStore;
+use Redist\storage\SectionHealth;
 
 $dbPath = sys_get_temp_dir() . '/redist-health-' . bin2hex(random_bytes(6)) . '.sqlite3';
 putenv('REDIST_SQLITE_PATH=' . $dbPath);
