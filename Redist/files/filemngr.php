@@ -36,6 +36,16 @@ class filemngr implements files {
         return SqliteStore::saveUserLog($key ?: self::currentKey(), $payload);
     }
 
+    public static function find_user_queue($entry) {
+        $needle = json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        foreach (SqliteStore::queueRows() as $row) {
+            $decoded = json_decode($row['payload_json'], true);
+            if ($decoded === $entry || json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) === $needle) return true;
+            if (is_string($entry) && $entry === $decoded) return true;
+        }
+        return false;
+    }
+
     public static function get_user_queue($filename = 'users.conf') {
         $rows = SqliteStore::queueRows();
         $entries = [];
