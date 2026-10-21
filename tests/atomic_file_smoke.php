@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../Redist/files/AtomicFile.php';
 
-use Redist\\files\\AtomicFile;
+use Redist\files\AtomicFile;
 
 function atomicFileCheck(bool $ok, string $message): void {
     if (!$ok) throw new RuntimeException('FAIL: ' . $message);
