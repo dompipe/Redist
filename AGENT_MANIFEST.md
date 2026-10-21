@@ -463,3 +463,19 @@ The scheduled `bin/dispatch-queue.php` worker also checks section health. When a
 A 2xx probe records the section as healthy. A non-2xx response, timeout, invalid destination, or unavailable cURL is recorded as a failed observation; the section is not marked healthy. Unknown, suspected-down, and down sections are probed again after the five-minute interval so a later successful response can record recovery. Healthy sections are not probed continuously; normal health becomes unknown again if its observations become stale under `stale_after_minutes`.
 
 The five-minute schedule depends on the CLI worker being run independently of traffic. On cPanel, schedule `php /absolute/path/to/Redist/bin/dispatch-queue.php` with cron; one-minute cron granularity means probes happen on the first worker run after the five-minute interval has elapsed.
+
+## Automatic soft IP throttling
+
+The dispatch ingress applies a soft priority penalty when one source address approaches the configured rolling request-rate threshold. It does not ban the address and does not drop admitted requests.
+
+- `REDIST_IP_RATE_LIMIT_PER_MINUTE` defaults to 60 new dispatch admissions in a rolling 60-second window.
+- `REDIST_IP_DEFER_RATIO` defaults to 0.75. At 75% of the configured limit, the request is marked for deferred priority.
+- A deferred request records `defer_until_wave` as the next wave ID. Ordinary eligible traffic is allowed to form that wave first; the deferred request becomes eligible after that wave completes.
+- If no ordinary traffic arrives, the timer may release a deferred-only queue after `REDIST_QUEUE_RELEASE_SECONDS` so low-volume traffic does not deadlock.
+- The rate count is shared across manifest sections, but uses a keyed HMAC pseudonym. Raw IP addresses are not stored in the reputation-event table.
+- The ingress uses the web server's `REMOTE_ADDR`; it deliberately does not trust arbitrary `X-Forwarded-For` headers. If Redist sits behind a reverse proxy, configure the web server to set a trustworthy client address before enabling this policy.
+- If the reputation recorder is unavailable, admission fails open to normal queue priority and logs the issue. It does not reject the request.
+- This is a heuristic rate guard, not machine learning and not proof that a source is a bot. Shared NATs and legitimate high-volume clients can trigger it. Tune the limit for the site and monitor the resulting deferrals.
+
+The response from a newly admitted request includes `priority` and a small `ip_rate` summary. These fields are operational feedback, not an identity or abuse verdict.
+
