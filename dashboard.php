@@ -139,16 +139,16 @@ if ($db !== null) {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ip_guard_action'])) {
             $action = (string)$_POST['ip_guard_action'];
             if ($action === 'blacklist') {
-                \\Redist\\storage\\IpRangeGuard::blacklist((string)($_POST['subject'] ?? ''), (string)($_POST['subject_type'] ?? 'ip'), (string)($_POST['reason'] ?? ''));
+                \Redist\storage\IpRangeGuard::blacklist((string)($_POST['subject'] ?? ''), (string)($_POST['subject_type'] ?? 'ip'), (string)($_POST['reason'] ?? ''));
                 $ipGuardNotice = 'Blacklist entry saved.';
             } elseif ($action === 'unblock') {
-                \\Redist\\storage\\IpRangeGuard::unblock((string)($_POST['subject'] ?? ''));
+                \Redist\storage\IpRangeGuard::unblock((string)($_POST['subject'] ?? ''));
                 $ipGuardNotice = 'Blacklist entry disabled.';
             }
         }
-        $ipBlacklistRows = \\Redist\\storage\\IpRangeGuard::blacklistRows(200);
-        $ipRangeRows = \\Redist\\storage\\IpRangeGuard::topRanges(50);
-        $ipChallengeRows = \\Redist\\storage\\IpRangeGuard::challengeRows(100);
+        $ipBlacklistRows = \Redist\storage\IpRangeGuard::blacklistRows(200);
+        $ipRangeRows = \Redist\storage\IpRangeGuard::topRanges(50);
+        $ipChallengeRows = \Redist\storage\IpRangeGuard::challengeRows(100);
     } catch (Throwable $e) { $ipGuardNotice = 'IP guard operation failed: ' . $e->getMessage(); }
 }
 
