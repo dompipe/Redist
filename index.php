@@ -6,6 +6,7 @@ require_once __DIR__ . '/Redist/storage/IpReputation.php';
 require_once __DIR__ . '/Redist/curl/QueueDispatcher.php';
 
 use Redist\storage\SqliteStore;
+use Redist\storage\IpReputation;
 use Redist\curl\QueueDispatcher;
 
 const REDIST_MAX_BODY_BYTES = 65536;
