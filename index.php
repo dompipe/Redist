@@ -98,6 +98,38 @@ $captchaRequired = (bool)$section['captcha'];
 if (isset($section['file_policies'][$path])) {
     $captchaRequired = (bool)$section['file_policies'][$path]['captcha'];
 }
+// Enforce the manifest CAPTCHA policy before creating a queue entry or dispatching.
+if ($captchaRequired) {
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        // HTTPS deployments should set session.cookie_secure=1 in PHP configuration.
+        session_start();
+    }
+    $captchaState = $_SESSION['redist_numeric_captcha'] ?? null;
+    $captchaScope = hash('sha256', $sectionId . "\n" . $path);
+    $captchaPassed = is_array($captchaState)
+        && !empty($captchaState['passed'])
+        && isset($captchaState['passed_at'], $captchaState['passed_scope'])
+        && (time() - (int)$captchaState['passed_at'] <= 1800)
+        && is_string($captchaState['passed_scope'])
+        && hash_equals($captchaScope, $captchaState['passed_scope']);
+    if (!$captchaPassed) {
+        $challengeUrl = 'Redist/captcha/numeric.php?mode=page&section='
+            . rawurlencode($sectionId) . '&path=' . rawurlencode($path);
+        redist_reply(403, [
+            'ack' => false,
+            'type' => 'CHALLENGE',
+            'status' => 'verification_required',
+            'error' => [
+                'code' => 'captcha_required',
+                'message' => 'Complete the numeric verification in this browser session, then retry the same dispatch request.',
+            ],
+            'captcha_required' => true,
+            'challenge_url' => $challengeUrl,
+            'section' => $sectionId,
+            'path' => $path,
+        ]);
+    }
+}
 $url=rtrim($section['target_origin'],'/').$path;
 if (!empty($payload['query'])) $url.='?'.http_build_query($payload['query']);
 $entry=['protocol_version'=>1,'request_id'=>$id,'section'=>$sectionId,'operation'=>'dispatch','payload'=>$payload,'metadata'=>is_array($e['metadata']??null)?$e['metadata']:new stdClass(),'_redist_target_url'=>$url];
