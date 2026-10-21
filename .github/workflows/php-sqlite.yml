@@ -14,17 +14,20 @@ jobs:
           php-version: '8.2'
           extensions: curl, pdo_sqlite
           coverage: none
-      - name: Lint changed PHP files
+      - name: Lint PHP files
         run: |
           php -l Redist/storage/SqliteStore.php
           php -l Redist/storage/SectionHealth.php
           php -l Redist/storage/IpRangeGuard.php
+          php -l Redist/storage/BehavioralIntelligence.php
           php -l Redist/storage/migrate.php
           php -l Redist/curl/WaveQueue.php
           php -l Redist/curl/curl.php
           php -l Redist/files/filemngr.php
           php -l Redist/url/purl.php
           php -l dashboard.php
-      - name: SQLite wave and queue smoke test
-        run: php tests/sqlite_smoke.php
+      - name: SQLite smoke tests
+        run: |
+          php tests/sqlite_smoke.php
           php tests/section_health_smoke.php
+          php tests/behavioral_intelligence_smoke.php
