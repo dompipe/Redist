@@ -169,7 +169,7 @@ if ($db !== null) {
             }
         }
         if (in_array('section_downtime', $tables, true)) {
-            $downtimeRows = $db->query("SELECT * FROM section_downtime ORDER BY id DESC LIMIT " . max(10, min(1000, (int)$sectionSettings['history_limit']))->fetchAll();
+            $downtimeRows = $db->query("SELECT * FROM section_downtime ORDER BY id DESC LIMIT " . max(10, min(1000, (int)$sectionSettings['history_limit'])))->fetchAll();
         }
     } catch (Throwable $e) { /* Health panel remains empty if the recorder schema is unavailable. */ }
 }
