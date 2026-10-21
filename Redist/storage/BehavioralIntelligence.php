@@ -91,10 +91,55 @@ final class BehavioralIntelligence {
             foreach($routes as $c) { $p=$c/$n; $entropy-=$p*log($p,2); }
             $entropy=min(1,$entropy/log($k,2));
         }
-        // Rows arrive newest-first. Detect repeated route-transition cycles in chronological order.
+        // Rows arrive newest-first. Analyze route and inter-arrival patterns chronologically.
         $sequence = array_reverse($sequence);
         $cyclePeriod = 0; $cycleRepetitions = 0;
         $sequenceCount = count($sequence);
+
+        // Only positive intervals are usable. Missing/second-resolution telemetry
+        // stays unknown instead of being interpreted as perfectly regular timing.
+        $eventTimes = [];
+        foreach (array_reverse($rows) as $eventRow) {
+            try {
+                $dt = new \\DateTimeImmutable((string)$eventRow['observed_at']);
+                $eventTimes[] = (float)$dt->format('U.u');
+            } catch (\\Throwable $ignored) {
+                // Ignore malformed timestamps rather than manufacturing a signal.
+            }
+        }
+        $intervals = [];
+        for ($i = 1, $timeCount = count($eventTimes); $i < $timeCount; $i++) {
+            $delta = $eventTimes[$i] - $eventTimes[$i - 1];
+            if ($delta > 0 && $delta <= 300) $intervals[] = $delta;
+        }
+        $intervalCount = count($intervals);
+        $meanInterval = $intervalCount ? array_sum($intervals) / $intervalCount : null;
+        $intervalCv = null;
+        if ($intervalCount >= 8 && $meanInterval > 0) {
+            $variance = 0.0;
+            foreach ($intervals as $delta) $variance += ($delta - $meanInterval) ** 2;
+            $intervalCv = sqrt($variance / $intervalCount) / $meanInterval;
+        }
+
+        // Quantize timing into 250 ms buckets and look for a short repeating
+        // interval signature. This requires several full repetitions.
+        $intervalPattern = array_map(static fn($delta) => (int)round($delta * 4), $intervals);
+        $timingCyclePeriod = 0; $timingCycleRepetitions = 0;
+        $intervalPatternCount = count($intervalPattern);
+        if ($intervalPatternCount >= 9 && count(array_unique($intervalPattern)) >= 2) {
+            for ($period = 2; $period <= min(6, intdiv($intervalPatternCount, 3)); $period++) {
+                $matches = 0;
+                for ($i = $intervalPatternCount - 1; $i >= $period; $i--) {
+                    if ($intervalPattern[$i] !== $intervalPattern[$i - $period]) break;
+                    $matches++;
+                }
+                $repetitions = 1 + intdiv($matches, $period);
+                if ($repetitions >= 3 && $matches >= 2 * $period && $repetitions > $timingCycleRepetitions) {
+                    $timingCyclePeriod = $period;
+                    $timingCycleRepetitions = $repetitions;
+                }
+            }
+        }
         if ($sequenceCount >= 9 && count(array_unique($sequence)) >= 2) {
             for ($period = 2; $period <= min(8, intdiv($sequenceCount, 3)); $period++) {
                 $matches = 0;
@@ -115,6 +160,12 @@ final class BehavioralIntelligence {
         if($n>=80 && $k<=2 && $engagement===0) { $score+=20; $reasons[]='repeated requests without observed engagement'; }
         if($n>=40 && $entropy<0.2 && $k<=2 && $engagement===0) { $score+=10; $reasons[]='highly repetitive route pattern'; }
         if($cycleRepetitions>=3 && $sequenceCount>=9) { $score+=20; $reasons[]='repeating route cycle detected across multiple periods'; }
+        if($intervalCv!==null && $intervalCv<=0.08 && $meanInterval!==null && $meanInterval<=10 && $intervalCount>=8) {
+            $score+=15; $reasons[]='highly regular request timing across multiple intervals';
+        }
+        if($timingCycleRepetitions>=3 && $intervalPatternCount>=9) {
+            $score+=15; $reasons[]='repeating inter-request timing pattern detected';
+        }
         if($n>=20 && $success/max(1,$n)<0.5) { $score+=10; $reasons[]='high non-2xx share'; }
         $mean=$dwell?array_sum($dwell)/count($dwell):null;
         if($engagement>0 && $mean!==null && $mean>=3000) $score=max(0,$score-15);
@@ -124,7 +175,13 @@ final class BehavioralIntelligence {
             'section_wide_events_15m'=>(int)$sectionStats['events'],'section_wide_sessions_15m'=>(int)$sectionStats['actors'],
             'section_wide_routes_15m'=>(int)$sectionStats['routes'],
             'route_entropy'=>round($entropy,3),'unique_routes'=>$k,'cycle_period'=>$cyclePeriod,
-            'cycle_repetitions'=>$cycleRepetitions,'engagement_events'=>$engagement,
+            'cycle_repetitions'=>$cycleRepetitions,
+            'positive_intervals'=>$intervalCount,
+            'mean_inter_request_seconds'=>$meanInterval===null?null:round($meanInterval,3),
+            'inter_request_interval_cv'=>$intervalCv===null?null:round($intervalCv,3),
+            'timing_cycle_period'=>$timingCyclePeriod,
+            'timing_cycle_repetitions'=>$timingCycleRepetitions,
+            'engagement_events'=>$engagement,
             'mean_dwell_ms'=>$mean===null?null:(int)round($mean),'risk_score'=>$score,
             'recommendation'=>$score>=65?'challenge':($score>=40?'mitigate':'allow'),
             'reasons'=>$reasons,'advisory_only'=>true];
