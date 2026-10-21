@@ -21,7 +21,7 @@ header('Referrer-Policy: no-referrer');
 
 $root = __DIR__;
 $dbPath = getenv('REDIST_SQLITE_PATH') ?: $root . '/server_logs/redist.sqlite3';
-$queueFile = $root . '/users.conf';
+$queueFile = $root . '/server_logs/users.conf';
 $userDir = $root . '/user_logs'; // legacy fallback only
 $serverDir = $root . '/server_logs'; // legacy fallback only
 $now = time();
@@ -63,7 +63,7 @@ if (is_file($dbPath) && class_exists(PDO::class)) {
         }
     } catch (Throwable $e) { $db = null; }
 }
-if ($db === null) $queue = readJsonFile($root . '/users.conf');
+if ($db === null) $queue = readJsonFile($root . '/server_logs/users.conf');
 $queueCount = is_array($queue) ? count($queue) : 0;
 $logFiles = [];
 $dbLogData = [];
