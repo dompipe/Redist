@@ -12,16 +12,24 @@ class curl extends \Redist implements pCURLs {
     static $content_type = 'application/json';
 
     public static function run() {
-        $sheet = isset(\Redist\url\pURL::$users->cookie_sheet) ? (array)\Redist\url\pURL::$users->cookie_sheet : array();
+        // pURL::$users is an array in the current request path; older callers may
+        // still provide an object with cookie_sheet, so accept either shape.
+        $users = \Redist\url\pURL::$users;
+        if (is_object($users) && isset($users->cookie_sheet)) $users = $users->cookie_sheet;
         $requests = array();
-        foreach ($sheet as $row) {
-            $row = (array)$row;
-            $url = isset($row['server']) ? $row['server'] : null;
+        foreach ((array)$users as $index => $entry) {
+            $row = (array)$entry;
+            $data = isset($row['data']) && is_array($row['data']) ? $row['data'] : array();
+            $url = isset($row['server']) ? $row['server'] : (isset($data['target_pg']) ? $data['target_pg'] : null);
             $token = isset($row['session']) ? $row['session'] : null;
-            if (!is_string($url) || $url === '') continue;
-            unset($row['server'], $row['session']);
-            $requests[] = array('id'=>(string)($token !== null ? $token : hash('sha256',$url.json_encode($row))),
-                'url'=>$url,'fields'=>$row,'token'=>$token);
+            if (!is_string($url) || !filter_var($url, FILTER_VALIDATE_URL)) continue;
+            $idSource = (isset($row['user_addr']) ? $row['user_addr'] : '') . '|' . $url . '|' . $index;
+            $requests[] = array(
+                'id'=>(string)($token !== null ? $token : hash('sha256', $idSource)),
+                'url'=>$url,
+                'fields'=>$data,
+                'token'=>$token
+            );
         }
         if (!$requests) return array('complete'=>true,'wave_id'=>null,'results'=>array());
         return self::dispatch_wave($requests, getcwd().'/server_logs/waves.json');
