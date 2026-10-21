@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/Redist/storage/SqliteStore.php';
+require_once __DIR__ . '/Redist/storage/IpReputation.php';
 require_once __DIR__ . '/Redist/curl/QueueDispatcher.php';
 
 use Redist\storage\SqliteStore;
@@ -85,8 +86,23 @@ try {
         if ($old['status']==='failed') redist_reply(502,['ack'=>false,'type'=>'NACK','status'=>'failed','duplicate'=>true,'request_id'=>$id,'message'=>'Request previously failed; reconcile destination outcome before retrying.']);
         redist_nack(409,'request_state_conflict','Existing request has an unsupported state.');
     }
+    // Soft-throttle a source IP when its rolling request rate approaches the
+    // configured worry threshold. Never trust X-Forwarded-For from arbitrary clients.
+    $ipDecision=['deferred'=>false,'count_60s'=>0,'threshold'=>max(10,(int)(getenv('REDIST_IP_RATE_LIMIT_PER_MINUTE') ?: 60)),'reason'=>'reputation_unavailable'];
+    try {
+        $ipDecision=IpReputation::observe($db,(string)($_SERVER['REMOTE_ADDR'] ?? ''),$sectionId);
+    } catch(Throwable $reputationError) {
+        error_log('Redist IP reputation unavailable; admitting at normal priority: '.$reputationError->getMessage());
+    }
+    $deferUntilWave=0;
+    $priority=0;
+    if (!empty($ipDecision['deferred'])) {
+        $deferUntilWave=(int)$db->query("SELECT COALESCE(MAX(id),0)+1 FROM waves")->fetchColumn();
+        $priority=1;
+    }
     $position=(int)$db->query("SELECT COALESCE(MAX(position),-1)+1 FROM queue_entries")->fetchColumn();
-    $ins=$db->prepare("INSERT INTO queue_entries(entry_key,position,payload_json,status) VALUES(?,?,?,'queued')");$ins->execute([$key,$position,$json]);$db->commit();
+    $ins=$db->prepare("INSERT INTO queue_entries(entry_key,position,payload_json,priority,defer_until_wave,status) VALUES(?,?,?,?,?,'queued')");
+    $ins->execute([$key,$position,$json,$priority,$deferUntilWave]);$db->commit();
 } catch(Throwable $x) {if(isset($db)&&$db instanceof PDO&&$db->inTransaction())$db->rollBack();error_log('Redist admission error: '.$x->getMessage());redist_nack(503,'storage_unavailable','Could not durably register request; no destination request was sent.');}
 try {$dispatch=QueueDispatcher::tick();} catch(Throwable $x) {error_log('Redist dispatch tick error: '.$x->getMessage());$dispatch=['released'=>false,'reason'=>'dispatcher_error'];}
-redist_reply(202,['ack'=>true,'type'=>'ACK','status'=>'queued','request_id'=>$id,'section'=>$sectionId,'dispatch'=>$dispatch,'message'=>'Request is durably queued. Admission ACK is not a served ACK; the timer worker releases low-volume queues and threshold releases happen as soon as this ingress detects the threshold.']);
+redist_reply(202,['ack'=>true,'type'=>'ACK','status'=>'queued','request_id'=>$id,'section'=>$sectionId,'priority'=>!empty($ipDecision['deferred'])?'deferred_after_next_wave':'normal','ip_rate'=>['count_last_60_seconds'=>(int)($ipDecision['count_60s'] ?? 0),'worry_threshold_per_minute'=>(int)($ipDecision['threshold'] ?? 60),'reason'=>$ipDecision['reason'] ?? 'unknown'],'dispatch'=>$dispatch,'message'=>'Request is durably queued. Admission ACK is not a served ACK; suspicious high-rate sources are soft-deferred behind the next eligible wave, not blocked.']);
