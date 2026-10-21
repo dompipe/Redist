@@ -36,6 +36,15 @@ function redist_section(array $manifest, string $id): array {
     if (!is_string($origin) || !filter_var($origin,FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($origin,PHP_URL_SCHEME)),['https','http'],true) || (parse_url($origin,PHP_URL_PATH) && parse_url($origin,PHP_URL_PATH)!=='/') || parse_url($origin,PHP_URL_USER)!==null || parse_url($origin,PHP_URL_PASS)!==null) {
         redist_nack(503,'section_not_dispatchable','This manifest section has no valid target_origin; no request was sent.',['section'=>$id]);
     }
+    // Per-section policy: "protect" enables Redist's adaptive IP-rate
+    // reputation/deferral policy; "no-protect" opts out of that policy only.
+    // Other ingress safeguards (method/body/envelope/manifest validation,
+    // idempotency, destination allowlisting, and queue/wave limits) still apply.
+    $protection = $section['protection'] ?? 'protect';
+    if (!in_array($protection, ['protect', 'no-protect'], true)) {
+        redist_nack(503, 'invalid_section_protection', 'Manifest section protection must be "protect" or "no-protect".', ['section' => $id]);
+    }
+    $section['protection'] = $protection;
     return $section;
 }
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
@@ -90,10 +99,14 @@ try {
     // Soft-throttle a source IP when its rolling request rate approaches the
     // configured worry threshold. Never trust X-Forwarded-For from arbitrary clients.
     $ipDecision=['deferred'=>false,'count_60s'=>0,'threshold'=>max(10,(int)(getenv('REDIST_IP_RATE_LIMIT_PER_MINUTE') ?: 60)),'reason'=>'reputation_unavailable'];
-    try {
-        $ipDecision=IpReputation::observe($db,(string)($_SERVER['REMOTE_ADDR'] ?? ''),$sectionId);
-    } catch(Throwable $reputationError) {
-        error_log('Redist IP reputation unavailable; admitting at normal priority: '.$reputationError->getMessage());
+    if (($section['protection'] ?? 'protect') === 'no-protect') {
+        $ipDecision['reason'] = 'section_no_protect';
+    } else {
+        try {
+            $ipDecision=IpReputation::observe($db,(string)($_SERVER['REMOTE_ADDR'] ?? ''),$sectionId);
+        } catch(Throwable $reputationError) {
+            error_log('Redist IP reputation unavailable; admitting at normal priority: '.$reputationError->getMessage());
+        }
     }
     $deferUntilWave=0;
     $priority=0;
@@ -106,4 +119,4 @@ try {
     $ins->execute([$key,$position,$json,$priority,$deferUntilWave]);$db->commit();
 } catch(Throwable $x) {if(isset($db)&&$db instanceof PDO&&$db->inTransaction())$db->rollBack();error_log('Redist admission error: '.$x->getMessage());redist_nack(503,'storage_unavailable','Could not durably register request; no destination request was sent.');}
 try {$dispatch=QueueDispatcher::tick();} catch(Throwable $x) {error_log('Redist dispatch tick error: '.$x->getMessage());$dispatch=['released'=>false,'reason'=>'dispatcher_error'];}
-redist_reply(202,['ack'=>true,'type'=>'ACK','status'=>'queued','request_id'=>$id,'section'=>$sectionId,'priority'=>!empty($ipDecision['deferred'])?'deferred_after_next_wave':'normal','ip_rate'=>['count_last_60_seconds'=>(int)($ipDecision['count_60s'] ?? 0),'worry_threshold_per_minute'=>(int)($ipDecision['threshold'] ?? 60),'reason'=>$ipDecision['reason'] ?? 'unknown'],'dispatch'=>$dispatch,'message'=>'Request is durably queued. Admission ACK is not a served ACK; suspicious high-rate sources are soft-deferred behind the next eligible wave, not blocked.']);
+redist_reply(202,['ack'=>true,'type'=>'ACK','status'=>'queued','request_id'=>$id,'section'=>$sectionId,'protection'=>$section['protection'] ?? 'protect','priority'=>!empty($ipDecision['deferred'])?'deferred_after_next_wave':'normal','ip_rate'=>['count_last_60_seconds'=>(int)($ipDecision['count_60s'] ?? 0),'worry_threshold_per_minute'=>(int)($ipDecision['threshold'] ?? 60),'reason'=>$ipDecision['reason'] ?? 'unknown'],'dispatch'=>$dispatch,'message'=>'Request is durably queued. Admission ACK is not a served ACK; protected sections may soft-defer suspicious high-rate sources behind the next eligible wave.']);
