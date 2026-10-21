@@ -133,6 +133,7 @@ $top = array_slice($ips, 0, 12);
 $ipGuardNotice = '';
 $ipBlacklistRows = [];
 $ipRangeRows = [];
+$ipChallengeRows = [];
 if ($db !== null) {
     try {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ip_guard_action'])) {
@@ -147,6 +148,7 @@ if ($db !== null) {
         }
         $ipBlacklistRows = \\Redist\\storage\\IpRangeGuard::blacklistRows(200);
         $ipRangeRows = \\Redist\\storage\\IpRangeGuard::topRanges(50);
+        $ipChallengeRows = \\Redist\\storage\\IpRangeGuard::challengeRows(100);
     } catch (Throwable $e) { $ipGuardNotice = 'IP guard operation failed: ' . $e->getMessage(); }
 }
 
@@ -285,6 +287,11 @@ main{max-width:1240px;margin:auto;padding:26px 18px 48px}.top{display:flex;align
   <h3 style="margin:18px 0 8px">Top IPv4 ranges · last 24 hours</h3>
   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:8px">A.B.C range</th><th style="text-align:left;padding:8px">Hits</th><th style="text-align:left;padding:8px">Unique IPs</th><th style="text-align:left;padding:8px">Last seen (UTC)</th></tr></thead><tbody>
   <?php if (!$ipRangeRows): ?><tr><td colspan="4" style="padding:8px">No incoming-IP observations recorded yet.</td></tr><?php else: foreach ($ipRangeRows as $range): ?><tr><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($range['range_cidr'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=number_format((int)$range['hits'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=number_format((int)$range['unique_ips'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($range['last_seen'])?></td></tr><?php endforeach; endif; ?>
+  </tbody></table></div>
+  <h3 style="margin:18px 0 8px">Range CAPTCHA challenges</h3>
+  <p style="color:#475569">Default trigger: 120 requests from one IPv4 /24 within one minute. Challenge duration defaults to 10 minutes. Configure <code>REDIST_RANGE_CHALLENGE_THRESHOLD</code>, <code>REDIST_RANGE_CHALLENGE_TTL_SECONDS</code>, <code>REDIST_TURNSTILE_SITE_KEY</code>, and <code>REDIST_TURNSTILE_SECRET_KEY</code> in the server environment.</p>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:8px">Range</th><th style="text-align:left;padding:8px">Started (UTC)</th><th style="text-align:left;padding:8px">Expires (UTC)</th><th style="text-align:left;padding:8px">Recent hits</th><th style="text-align:left;padding:8px">State</th></tr></thead><tbody>
+  <?php if (!$ipChallengeRows): ?><tr><td colspan="5" style="padding:8px">No range challenges recorded.</td></tr><?php else: foreach ($ipChallengeRows as $challengeRow): ?><tr><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($challengeRow['range_cidr'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($challengeRow['started_at'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($challengeRow['expires_at'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=number_format((int)$challengeRow['hit_count'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($challengeRow['status'])?></td></tr><?php endforeach; endif; ?>
   </tbody></table></div>
   <h3 style="margin:18px 0 8px">Blacklist entries</h3>
   <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:8px">Subject</th><th style="text-align:left;padding:8px">Type</th><th style="text-align:left;padding:8px">Reason</th><th style="text-align:left;padding:8px">Status</th><th style="text-align:left;padding:8px">Action</th></tr></thead><tbody>
