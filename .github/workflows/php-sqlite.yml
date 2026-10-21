@@ -28,9 +28,13 @@ jobs:
           php -l Redist/url/purl.php
           php -l dashboard.php
           php -l index.php
+          php -l Redist/curl/QueueDispatcher.php
+          php -l bin/dispatch-queue.php
+          php -l tests/queue_dispatcher_smoke.php
       - name: SQLite smoke tests
         run: |
           php tests/sqlite_smoke.php
           php tests/section_health_smoke.php
           php tests/behavioral_intelligence_smoke.php
           php tests/timing_pattern_smoke.php
+          php tests/queue_dispatcher_smoke.php
