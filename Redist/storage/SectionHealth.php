@@ -33,15 +33,24 @@ final class SectionHealth {
             status TEXT NOT NULL CHECK(status IN ('open','recovered'))
         )");
         $db->exec("CREATE INDEX IF NOT EXISTS idx_downtime_section_status ON section_downtime(section_id, status, id DESC)");
+        $db->exec("CREATE TABLE IF NOT EXISTS redist_settings (
+            setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        )");
+        foreach (['failure_threshold'=>'5','recovery_successes'=>'1','history_limit'=>'100','stale_after_minutes'=>'30'] as $key=>$value) {
+            $q = $db->prepare('INSERT OR IGNORE INTO redist_settings(setting_key,setting_value) VALUES(?,?)');
+            $q->execute([$key,$value]);
+        }
     }
 
     /**
      * Record one actual destination result. Defaults are intentionally conservative:
      * 5 consecutive failures before declaring down; any 2xx closes an open incident.
      */
-    public static function observe(string $sectionId, ?int $httpCode, ?string $error = null, ?string $observedAt = null, int $failureThreshold = 5): array {
+    public static function observe(string $sectionId, ?int $httpCode, ?string $error = null, ?string $observedAt = null, ?int $failureThreshold = null): array {
         $sectionId = trim($sectionId);
         if ($sectionId === '' || strlen($sectionId) > 200) throw new RuntimeException('sectionId must be 1-200 characters.');
+        $failureThreshold = $failureThreshold ?? self::settings()['failure_threshold'];
         if ($failureThreshold < 1 || $failureThreshold > 1000) throw new RuntimeException('failureThreshold must be between 1 and 1000.');
         $at = $observedAt ?: gmdate('Y-m-d\TH:i:s\Z');
         $success = $httpCode !== null && $httpCode >= 200 && $httpCode < 300 && ($error === null || $error === '');
