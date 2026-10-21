@@ -96,6 +96,11 @@ foreach ($ipCounts as $ip => $hits) {
     $ips[] = ['ip' => $ip, 'hits' => $hits, 'level' => $hits >= 20 ? 'HIGH' : ($hits >= 8 ? 'WATCH' : 'LOW')];
 }
 $serverFiles = [];
+if ($db !== null) {
+    foreach ($db->query("SELECT log_key, LENGTH(COALESCE(payload_json,raw_text,'')) AS bytes, updated_at FROM server_logs ORDER BY log_key") as $row) {
+        $serverFiles[] = ['name'=>$row['log_key'],'bytes'=>(int)$row['bytes'],'mtime'=>strtotime((string)$row['updated_at']) ?: 0];
+    }
+}
 if ($db === null && is_dir($serverDir) && is_readable($serverDir)) {
     foreach (new DirectoryIterator($serverDir) as $f) {
         if (!$f->isDot() && $f->isFile()) $serverFiles[] = ['name' => $f->getFilename(), 'bytes' => $f->getSize(), 'mtime' => $f->getMTime()];
