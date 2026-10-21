@@ -116,6 +116,28 @@ $serverBytes = 0;
 foreach ($serverFiles as $f) $serverBytes += $f['bytes'];
 $top = array_slice($ips, 0, 12);
 
+$sectionHealthRows = [];
+$downtimeRows = [];
+if ($db !== null) {
+    try {
+        $tables = $db->query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('section_health_events','section_downtime')")->fetchAll(PDO::FETCH_COLUMN);
+        if (in_array('section_health_events', $tables, true)) {
+            $sectionIds = $db->query("SELECT DISTINCT section_id FROM section_health_events ORDER BY section_id")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($sectionIds as $sectionId) {
+                $q = $db->prepare("SELECT id,observed_at,http_code,error,is_success FROM section_health_events WHERE section_id=? ORDER BY id DESC LIMIT 5");
+                $q->execute([$sectionId]); $recent = $q->fetchAll();
+                $q = $db->prepare("SELECT * FROM section_downtime WHERE section_id=? ORDER BY id DESC LIMIT 1");
+                if (in_array('section_downtime', $tables, true)) { $q->execute([$sectionId]); $incident = $q->fetch() ?: null; } else $incident = null;
+                $state = !$recent ? 'unknown' : (($incident && $incident['status'] === 'open') ? 'down' : ((int)$recent[0]['is_success'] === 1 ? 'healthy' : 'suspected_down'));
+                $sectionHealthRows[] = ['section_id'=>$sectionId,'state'=>$state,'last'=>$recent[0]['observed_at'] ?? null,'code'=>$recent[0]['http_code'] ?? null,'incident'=>$incident];
+            }
+        }
+        if (in_array('section_downtime', $tables, true)) {
+            $downtimeRows = $db->query("SELECT * FROM section_downtime ORDER BY id DESC LIMIT 20")->fetchAll();
+        }
+    } catch (Throwable $e) { /* Health panel remains empty if the recorder schema is unavailable. */ }
+}
+
 $logByHash = [];
 if ($db !== null) {
     $logByHash = $dbLogData;
@@ -161,7 +183,36 @@ $waveNow = $queueCount + count($logFiles);
 :root{color-scheme:dark;--bg:#0a0f18;--panel:#111b29;--line:#24354a;--text:#e7eef8;--muted:#8fa3bb;--cyan:#53d8d1;--red:#ff667e;--amber:#f7bd59}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 10% 0%,#17263b 0,transparent 45%),var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
 main{max-width:1240px;margin:auto;padding:26px 18px 48px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px}.eyebrow{color:var(--cyan);font-size:11px;letter-spacing:.18em;text-transform:uppercase;font-weight:800}h1{font-size:clamp(26px,4vw,38px);margin:4px 0}p{color:var(--muted);margin:0}.stamp{color:var(--muted);font-variant-numeric:tabular-nums}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.panel,.metric{background:linear-gradient(145deg,#142133,#0e1724);border:1px solid var(--line);border-radius:15px;padding:18px;min-width:0}.metric small{display:block;color:var(--muted);font-weight:650}.metric strong{display:block;font-size:clamp(25px,3vw,34px);margin:6px 0;font-variant-numeric:tabular-nums}.sub{font-size:12px;color:var(--muted)}.layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:12px;margin-top:12px}.panel h2{font-size:16px;margin:0 0 4px}.panelhead{display:flex;justify-content:space-between;align-items:start;gap:12px;margin-bottom:14px}.pill{border:1px solid var(--line);border-radius:999px;padding:4px 9px;font-size:11px;color:var(--cyan);white-space:nowrap}.chart{width:100%;height:210px;display:block}.legend{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700}td,th{padding:11px 8px;border-bottom:1px solid #223044}td:first-child{font-variant-numeric:tabular-nums}tbody tr:last-child td{border-bottom:0}.level{font-size:10px;font-weight:800;letter-spacing:.06em}.HIGH{color:var(--red)}.WATCH{color:var(--amber)}.LOW{color:var(--cyan)}.foot{margin-top:12px;font-size:12px;color:var(--muted)}.bookshelf{margin-top:12px}.shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;align-items:end;padding:14px 12px 17px;background:linear-gradient(#101b2a,#0b1420);border:1px solid #263a50;border-radius:12px;margin-top:12px;box-shadow:inset 0 -5px #29384a}.book{position:relative;min-height:116px;padding:12px 10px 10px;border:1px solid #3a5971;border-bottom:5px solid #345166;border-radius:5px 8px 3px 3px;background:linear-gradient(110deg,#1d4555,#16303f 45%,#102633);cursor:help;box-shadow:3px 3px 0 #08111b;overflow:visible}.book:nth-child(3n+2){background:linear-gradient(110deg,#59442c,#3d3022 45%,#292116);border-color:#78603b;border-bottom-color:#6d5230}.book:nth-child(3n){background:linear-gradient(110deg,#343b68,#252b4d 45%,#191e38);border-color:#4c5687;border-bottom-color:#454e7a}.booknum{font-size:10px;letter-spacing:.12em;color:#c5d7e7;text-transform:uppercase}.bookname{font-weight:750;font-size:13px;overflow-wrap:anywhere;margin:9px 0 5px}.bookmeta{font-size:11px;color:#c0cfdf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.booktip{display:none;position:absolute;z-index:10;left:0;bottom:calc(100% + 9px);width:min(280px,80vw);white-space:normal;overflow-wrap:anywhere;padding:12px;background:#f2f6fb;color:#172537;border:1px solid #b7c7d8;border-radius:9px;box-shadow:0 12px 32px #0009;font-size:12px;line-height:1.45}.book:hover .booktip,.book:focus .booktip{display:block}.booktip strong{display:block;margin-bottom:5px}.booktip span{display:block;margin-top:3px}.shelfempty{color:var(--muted);padding:18px;text-align:center}.book:focus{outline:2px solid var(--cyan);outline-offset:2px}.files{display:grid;gap:9px;margin-top:12px}.file{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #223044;padding:8px 0}.file:last-child{border:0}.empty{padding:20px;color:var(--muted);text-align:center}@media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.layout{grid-template-columns:1fr}}@media(max-width:420px){main{padding:18px 12px}.metric,.panel{padding:14px}}
-</style></head><body><main>
+</style></head><body>
+<section class="panel" style="margin:20px 0;padding:18px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#172033">
+  <h2 style="margin:0 0 8px">Section availability</h2>
+  <p style="margin:0 0 12px;color:#475569">Live observations recorded by Redist dispatch. No observations are shown as unknown, not down.</p>
+  <?php if (!$sectionHealthRows): ?>
+    <p>No section health observations recorded yet.</p>
+  <?php else: ?>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr><th style="text-align:left;padding:8px">Section / destination</th><th style="text-align:left;padding:8px">State</th><th style="text-align:left;padding:8px">Last observation</th><th style="text-align:left;padding:8px">HTTP</th><th style="text-align:left;padding:8px">Current downtime</th></tr></thead><tbody>
+      <?php foreach ($sectionHealthRows as $row): $incident=$row['incident']; ?>
+        <tr>
+          <td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($row['section_id']) ?></td>
+          <td style="padding:8px;border-top:1px solid #e2e8f0"><strong><?= esc(strtoupper(str_replace('_',' ',$row['state']))) ?></strong></td>
+          <td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($row['last'] ?? '—') ?></td>
+          <td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($row['code'] ?? '—') ?></td>
+          <td style="padding:8px;border-top:1px solid #e2e8f0"><?php if ($incident && $incident['status']==='open'): ?>Open since <?= esc($incident['started_at']) ?> (detected <?= esc($incident['detected_at']) ?>)<?php else: ?>—<?php endif; ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody></table></div>
+  <?php endif; ?>
+  <h3 style="margin:18px 0 8px">Downtime history</h3>
+  <?php if (!$downtimeRows): ?><p>No downtime incidents recorded.</p><?php else: ?>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr><th style="text-align:left;padding:8px">Section</th><th style="text-align:left;padding:8px">Started</th><th style="text-align:left;padding:8px">Detected</th><th style="text-align:left;padding:8px">Recovered</th><th style="text-align:left;padding:8px">Failures</th><th style="text-align:left;padding:8px">Status</th></tr></thead><tbody>
+      <?php foreach ($downtimeRows as $incident): ?>
+        <tr><td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($incident['section_id']) ?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($incident['started_at']) ?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($incident['detected_at']) ?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($incident['recovered_at'] ?? '—') ?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($incident['failure_count']) ?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?= esc($incident['status']) ?></td></tr>
+      <?php endforeach; ?>
+      </tbody></table></div>
+  <?php endif; ?>
+</section><main>
 <header class="top"><div><div class="eyebrow">Redist / traffic observability</div><h1>Operations panel</h1><p>Read-only view of queue and output files</p></div><div class="stamp">Snapshot · <?=esc(date('Y-m-d H:i:s T', $now))?></div></header>
 <section class="grid">
 <div class="metric"><small>Queue backlog</small><strong><?=number_format($queueCount)?></strong><span class="sub">entries in SQLite queue</span></div>
