@@ -573,3 +573,36 @@ Example:
 Use only the exact values `protect` and `no-protect`; other values are a manifest configuration error and ingress rejects the section with HTTP 503. The ingress response reports the selected `protection` mode. Keep protection enabled unless the section owner has deliberately accepted the trade-off.
 
 **Integration note:** this key currently governs the ingress `IpReputation` rate/deferral behavior in `index.php`. It does not yet exempt a section from or route it through the separate legacy `pURL::spoof_check()` / Cloudflare Turnstile challenge flow, nor is the new numeric CAPTCHA wired into that legacy gate. Before treating the manifest value as the sole policy authority, make all protected entry paths consult the same section policy and bind CAPTCHA passes to the correct session/scope.
+
+
+## CAPTCHA policy at section and file level
+
+A section may set `"captcha": true` or `"captcha": false`. The default is `false` to preserve existing behavior. Individual exact request paths can override the section value using `file_policies`:
+
+```json
+{
+  "version": 1,
+  "sections": {
+    "account": {
+      "target_origin": "https://account.example.com",
+      "protection": "protect",
+      "captcha": true,
+      "file_policies": {
+        "/login.php": { "captcha": true },
+        "/status.php": { "captcha": false }
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- `captcha` must be a JSON boolean, not the strings `"true"` or `"false"`.
+- `file_policies` is an object keyed by exact absolute request path. Each entry must contain a boolean `captcha`.
+- An exact file/path setting overrides the section-level `captcha` value. If no exact override exists, the section value applies.
+- `captcha_required` is returned in the queue-admission response so the policy layer can decide whether to require a challenge.
+- Query strings are not part of the file-policy key; matching uses the validated `payload.path` only.
+- Invalid policy values cause the manifest section to be rejected with HTTP 503.
+
+**Enforcement status:** the manifest flag is now parsed and resolved at ingress, but the numeric CAPTCHA has not yet been integrated as a mandatory gate before queue admission. Until that wiring and pass-token/session validation are implemented, `captcha_required` is a policy signal, not proof that a challenge was completed. Do not rely on the flag alone to protect a sensitive endpoint.
