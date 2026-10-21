@@ -264,7 +264,7 @@ Persist response observations and incident transitions in the durable store, not
 
 Do not treat a response to a different section as proof of recovery. Recovery must be attributed to the same section and should follow the configured recovery threshold. Never silently delete downtime history; retention must be explicit and configurable.
 
-The current implementation's recorder API and schema must be wired to real dispatch outcomes before the dashboard can claim live health. Unit/smoke tests should cover no traffic, 2xx, threshold crossing, transport failures, recovery, persistent history, and separate section IDs. A standalone recorder that is not called by the dispatcher is not live monitoring.
+The current branch records outcomes from the multi-cURL wave dispatcher and exposes section health plus downtime history in the protected operations dashboard. Until manifest routing is implemented, these observations are grouped by exact destination hostname (`host:<hostname>`), not by inferred path-based logical sections. The dashboard is live only for requests that actually pass through this dispatcher; it is not an independent active probe, and an idle destination remains unknown. Unit/smoke tests cover no traffic, 2xx, threshold crossing, recovery, persistent history, and separate section IDs. Validate the tests in CI before treating this as production-ready.
 
 ## Wave policy
 
