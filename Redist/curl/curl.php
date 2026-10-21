@@ -3,6 +3,9 @@ namespace Redist\curl;
 
 require_once __DIR__ . '/pcurls.php';
 require_once __DIR__ . '/WaveQueue.php';
+require_once dirname(__DIR__) . '/storage/SectionHealth.php';
+
+use Redist\\storage\\SectionHealth;
 
 /**
  * Multi-cURL dispatcher with response collection and completion-gated waves.
@@ -132,6 +135,11 @@ class curl extends \Redist implements pCURLs {
         foreach ($results as $i=>$result) {
             $r = $byKey[$i];
             WaveQueue::record($stateFile,$wave['id'],(string)$r['id'],$result['http_code'],$result['error']);
+            $host = strtolower((string)parse_url($r['url'], PHP_URL_HOST));
+            if ($host !== '') {
+                // Until manifest routing is implemented, health is grouped by exact destination hostname.
+                SectionHealth::observe('host:' . rtrim($host, '.'), (int)$result['http_code'], $result['error']);
+            }
             $results[$i]['member_id'] = (string)$r['id'];
             $results[$i]['success'] = $result['error'] === null && $result['http_code'] >= 200 && $result['http_code'] < 300;
         }
