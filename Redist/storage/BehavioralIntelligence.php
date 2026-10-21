@@ -69,9 +69,10 @@ final class BehavioralIntelligence {
         $since = gmdate('Y-m-d\TH:i:s\Z',time()-900);
         $q = $db->prepare('SELECT route_key,event_kind,http_code,dwell_ms,observed_at FROM behavior_events WHERE section_id=? AND actor_key=? AND observed_at>=? ORDER BY id DESC LIMIT 600');
         $q->execute([$section,$actor,$since]); $rows=$q->fetchAll();
-        $n=count($rows); $routes=[]; $engagement=0; $success=0; $dwell=[];
+        $n=count($rows); $routes=[]; $sequence=[]; $engagement=0; $success=0; $dwell=[];
         foreach($rows as $r) {
             $routes[$r['route_key']]=($routes[$r['route_key']]??0)+1;
+            $sequence[]=(string)$r['route_key'];
             if(in_array($r['event_kind'],['click','scroll','navigation'],true)) $engagement++;
             if((int)($r['http_code']??0)>=200 && (int)$r['http_code']<300) $success++;
             if($r['dwell_ms']!==null) $dwell[]=(int)$r['dwell_ms'];
@@ -90,11 +91,30 @@ final class BehavioralIntelligence {
             foreach($routes as $c) { $p=$c/$n; $entropy-=$p*log($p,2); }
             $entropy=min(1,$entropy/log($k,2));
         }
+        // Rows arrive newest-first. Detect repeated route-transition cycles in chronological order.
+        $sequence = array_reverse($sequence);
+        $cyclePeriod = 0; $cycleRepetitions = 0;
+        $sequenceCount = count($sequence);
+        if ($sequenceCount >= 9) {
+            for ($period = 2; $period <= min(8, intdiv($sequenceCount, 3)); $period++) {
+                $matches = 0;
+                for ($i = $sequenceCount - 1; $i >= $period; $i--) {
+                    if ($sequence[$i] !== $sequence[$i - $period]) break;
+                    $matches++;
+                }
+                $repetitions = 1 + intdiv($matches, $period);
+                if ($repetitions >= 3 && $matches >= 2 * $period && $repetitions > $cycleRepetitions) {
+                    $cyclePeriod = $period;
+                    $cycleRepetitions = $repetitions;
+                }
+            }
+        }
         $score=0; $reasons=[];
         if($ratio>=4 && $rate>=20) { $score+=25; $reasons[]='rate far above this section baseline'; }
         if($ratio>=8 && $rate>=40) { $score+=15; $reasons[]='extreme sustained rate'; }
         if($n>=80 && $k<=2 && $engagement===0) { $score+=20; $reasons[]='repeated requests without observed engagement'; }
         if($n>=40 && $entropy<0.2 && $k<=2 && $engagement===0) { $score+=10; $reasons[]='highly repetitive route pattern'; }
+        if($cycleRepetitions>=3 && $sequenceCount>=9) { $score+=20; $reasons[]='repeating route cycle detected across multiple periods'; }
         if($n>=20 && $success/max(1,$n)<0.5) { $score+=10; $reasons[]='high non-2xx share'; }
         $mean=$dwell?array_sum($dwell)/count($dwell):null;
         if($engagement>0 && $mean!==null && $mean>=3000) $score=max(0,$score-15);
@@ -103,7 +123,8 @@ final class BehavioralIntelligence {
             'baseline_per_minute'=>round($baseline,2),'rate_ratio'=>round($ratio,2),
             'section_wide_events_15m'=>(int)$sectionStats['events'],'section_wide_sessions_15m'=>(int)$sectionStats['actors'],
             'section_wide_routes_15m'=>(int)$sectionStats['routes'],
-            'route_entropy'=>round($entropy,3),'unique_routes'=>$k,'engagement_events'=>$engagement,
+            'route_entropy'=>round($entropy,3),'unique_routes'=>$k,'cycle_period'=>$cyclePeriod,
+            'cycle_repetitions'=>$cycleRepetitions,'engagement_events'=>$engagement,
             'mean_dwell_ms'=>$mean===null?null:(int)round($mean),'risk_score'=>$score,
             'recommendation'=>$score>=65?'challenge':($score>=40?'mitigate':'allow'),
             'reasons'=>$reasons,'advisory_only'=>true];
