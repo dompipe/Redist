@@ -246,7 +246,7 @@ class pURL implements pUser {
 		
 		$host = self::$request['session'][$_SERVER['HTTP_REFERER']]['user_addr'];
 		self::disassemble_IP($host);
-		self::$users = self::$users = self::$files->get_user_queue();
+		self::$users = self::$files->get_user_queue();
 		self::$users[] = self::$request['session'][$_SERVER['HTTP_REFERER']];
 		self::patch_connection();
 	}
