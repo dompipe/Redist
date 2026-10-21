@@ -1,50 +1,75 @@
 <?php
-
 namespace Redist\curl;
 
+require_once dirname(__DIR__) . '/storage/SqliteStore.php';
+
+use Redist\storage\SqliteStore;
+
+/** SQLite-backed completion gate. The legacy $file argument is ignored for compatibility. */
 final class WaveQueue {
-    public static function begin($file,$ids) {
-        return self::mutate($file,function (&$s) use ($ids) {
-            if (isset($s['current']) && !self::isComplete($s['current'])) throw new \RuntimeException('Current wave is incomplete; next wave is held.');
-            $n = isset($s['last_wave']) ? (int)$s['last_wave']+1 : 1; $members=array();
-            foreach ($ids as $id) $members[(string)$id]=array('status'=>'pending','http_code'=>null,'error'=>null,'completed_at'=>null);
-            $s['last_wave']=$n; $s['current']=array('id'=>$n,'started_at'=>gmdate('c'),'completed_at'=>null,'members'=>$members);
-            return $s['current'];
-        });
+    public static function begin($file, $ids) {
+        $db = SqliteStore::db();
+        $db->beginTransaction();
+        try {
+            $last = $db->query("SELECT id,status FROM waves ORDER BY id DESC LIMIT 1")->fetch();
+            if ($last && $last['status'] !== 'complete') {
+                throw new \RuntimeException('Previous wave is not complete; next wave is held.');
+            }
+            $db->exec("INSERT INTO waves(status) VALUES('running')");
+            $waveId = (int)$db->lastInsertId();
+            $insert = $db->prepare("INSERT INTO wave_members(wave_id,member_id,status) VALUES(?,?,'pending')");
+            foreach ($ids as $id) $insert->execute([$waveId, (string)$id]);
+            $db->commit();
+            return ['id'=>$waveId, 'status'=>'running'];
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
     }
-    public static function record($file,$wave,$id,$code,$error) {
-        return self::mutate($file,function (&$s) use ($wave,$id,$code,$error) {
-            if (!isset($s['current']) || (int)$s['current']['id'] !== (int)$wave) throw new \RuntimeException('Wave is not current.');
-            if (!isset($s['current']['members'][$id])) throw new \RuntimeException('Unknown wave member.');
-            $ok=($error===null || $error==='') && (int)$code>=200 && (int)$code<300;
-            $s['current']['members'][$id]=array('status'=>$ok?'served':'failed','http_code'=>(int)$code,'error'=>$error,'completed_at'=>gmdate('c'));
-            if (self::isComplete($s['current'])) $s['current']['completed_at']=gmdate('c');
-            return $s['current'];
-        });
+
+    public static function record($file, $wave, $id, $code, $error) {
+        $db = SqliteStore::db();
+        $ok = ($error === null || $error === '') && (int)$code >= 200 && (int)$code < 300;
+        $db->beginTransaction();
+        try {
+            $q = $db->prepare("UPDATE wave_members SET status=?,http_code=?,error=?,completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE wave_id=? AND member_id=?");
+            $q->execute([$ok ? 'served' : 'failed', (int)$code, $error, (int)$wave, (string)$id]);
+            if ($q->rowCount() !== 1) throw new \RuntimeException('Unknown wave member.');
+            $counts = $db->prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='served' THEN 1 ELSE 0 END) served, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed FROM wave_members WHERE wave_id=?");
+            $counts->execute([(int)$wave]);
+            $c = $counts->fetch();
+            if ((int)$c['failed'] > 0) {
+                $u = $db->prepare("UPDATE waves SET status='blocked' WHERE id=?");
+                $u->execute([(int)$wave]);
+            } elseif ((int)$c['total'] > 0 && (int)$c['total'] === (int)$c['served']) {
+                $u = $db->prepare("UPDATE waves SET status='complete',completed_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?");
+                $u->execute([(int)$wave]);
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        return self::read($file)['current'];
     }
+
     public static function isComplete($wave) {
         if (!is_array($wave) || empty($wave['members'])) return false;
-        foreach ($wave['members'] as $m) if (!isset($m['status']) || $m['status']!=='served') return false;
+        foreach ($wave['members'] as $m) if (($m['status'] ?? '') !== 'served') return false;
         return true;
     }
+
     public static function read($file) {
-        if (!is_file($file)) return array('last_wave'=>0,'current'=>null);
-        $s=json_decode(file_get_contents($file),true);
-        return is_array($s)?$s:array('last_wave'=>0,'current'=>null);
-    }
-    private static function mutate($file,$fn) {
-        $dir=dirname($file);
-        if (!is_dir($dir) && !mkdir($dir,0750,true) && !is_dir($dir)) throw new \RuntimeException('Cannot create wave-state directory.');
-        $lock=fopen($file.'.lock','c+');
-        if (!$lock) throw new \RuntimeException('Cannot open wave-state lock.');
-        try {
-            if (!flock($lock,LOCK_EX)) throw new \RuntimeException('Cannot lock wave state.');
-            $s=self::read($file); $out=$fn($s);
-            $json=json_encode($s,JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES);
-            if ($json===false) throw new \RuntimeException('Cannot encode wave state.');
-            $tmp=$file.'.tmp.'.bin2hex(random_bytes(5));
-            if (file_put_contents($tmp,$json,LOCK_EX)===false || !rename($tmp,$file)) { @unlink($tmp); throw new \RuntimeException('Cannot persist wave state.'); }
-            flock($lock,LOCK_UN); return $out;
-        } finally { fclose($lock); }
+        $db = SqliteStore::db();
+        $wave = $db->query("SELECT id,status,started_at,completed_at FROM waves ORDER BY id DESC LIMIT 1")->fetch();
+        if (!$wave) return ['last_wave'=>0,'current'=>null];
+        $q = $db->prepare("SELECT member_id,status,http_code,error,completed_at FROM wave_members WHERE wave_id=? ORDER BY member_id");
+        $q->execute([(int)$wave['id']]);
+        $members = [];
+        foreach ($q->fetchAll() as $m) {
+            $members[$m['member_id']] = ['status'=>$m['status'],'http_code'=>$m['http_code'] === null ? null : (int)$m['http_code'],'error'=>$m['error'],'completed_at'=>$m['completed_at']];
+        }
+        $current = ['id'=>(int)$wave['id'],'status'=>$wave['status'],'started_at'=>$wave['started_at'],'completed_at'=>$wave['completed_at'],'members'=>$members];
+        return ['last_wave'=>(int)$wave['id'],'current'=>$current];
     }
 }
