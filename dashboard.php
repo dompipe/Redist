@@ -20,9 +20,9 @@ header('Cache-Control: no-store, max-age=0');
 header('Referrer-Policy: no-referrer');
 
 $root = __DIR__;
-$queueFile = $root . '/users.conf';
-$userDir = $root . '/user_logs';
-$serverDir = $root . '/server_logs';
+$dbPath = getenv('REDIST_SQLITE_PATH') ?: $root . '/server_logs/redist.sqlite3';
+$userDir = $root . '/user_logs'; // legacy fallback only
+$serverDir = $root . '/server_logs'; // legacy fallback only
 $now = time();
 
 function readJsonFile(string $path): mixed {
@@ -48,10 +48,31 @@ function collectIps(mixed $v, array &$counts, array &$lastSeen): void {
 }
 function esc(mixed $s): string { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 
-$queue = readJsonFile($queueFile);
+$queue = null;
+$db = null;
+if (is_file($dbPath) && class_exists(PDO::class)) {
+    try {
+        $db = new PDO('sqlite:' . $dbPath, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        $db->exec('PRAGMA busy_timeout=3000');
+        $queueRows = $db->query("SELECT payload_json FROM queue_entries WHERE status='queued' ORDER BY position,id")->fetchAll();
+        $queue = [];
+        foreach ($queueRows as $row) {
+            $entry = json_decode($row['payload_json'], true);
+            if (json_last_error() === JSON_ERROR_NONE) $queue[] = $entry;
+        }
+    } catch (Throwable $e) { $db = null; }
+}
+if ($db === null) $queue = readJsonFile($root . '/users.conf');
 $queueCount = is_array($queue) ? count($queue) : 0;
 $logFiles = [];
-if (is_dir($userDir) && is_readable($userDir)) {
+$dbLogData = [];
+if ($db !== null) {
+    foreach ($db->query('SELECT log_key,payload_json FROM user_logs') as $row) {
+        $decoded = json_decode($row['payload_json'], true);
+        if (json_last_error() === JSON_ERROR_NONE) $dbLogData[$row['log_key']] = $decoded;
+    }
+}
+if ($db === null && is_dir($userDir) && is_readable($userDir)) {
     foreach (new DirectoryIterator($userDir) as $f) {
         if ($f->isDot() || !$f->isFile() || !$f->isReadable()) continue;
         $logFiles[] = $f->getPathname();
@@ -59,10 +80,14 @@ if (is_dir($userDir) && is_readable($userDir)) {
 }
 $ipCounts = [];
 $events = [];
-foreach ($logFiles as $path) {
-    $data = readJsonFile($path);
-    if ($data === null) continue;
-    collectIps($data, $ipCounts, $events);
+if ($db !== null) {
+    foreach ($dbLogData as $data) collectIps($data, $ipCounts, $events);
+} else {
+    foreach ($logFiles as $path) {
+        $data = readJsonFile($path);
+        if ($data === null) continue;
+        collectIps($data, $ipCounts, $events);
+    }
 }
 arsort($ipCounts);
 $ips = [];
@@ -70,19 +95,27 @@ foreach ($ipCounts as $ip => $hits) {
     $ips[] = ['ip' => $ip, 'hits' => $hits, 'level' => $hits >= 20 ? 'HIGH' : ($hits >= 8 ? 'WATCH' : 'LOW')];
 }
 $serverFiles = [];
-if (is_dir($serverDir) && is_readable($serverDir)) {
+if ($db === null && is_dir($serverDir) && is_readable($serverDir)) {
     foreach (new DirectoryIterator($serverDir) as $f) {
         if (!$f->isDot() && $f->isFile()) $serverFiles[] = ['name' => $f->getFilename(), 'bytes' => $f->getSize(), 'mtime' => $f->getMTime()];
     }
 }
 $logBytes = 0;
-foreach ($logFiles as $path) $logBytes += (int)@filesize($path);
+if ($db !== null) {
+    foreach ($dbLogData as $data) $logBytes += strlen((string)json_encode($data));
+} else {
+    foreach ($logFiles as $path) $logBytes += (int)@filesize($path);
+}
 $serverBytes = 0;
 foreach ($serverFiles as $f) $serverBytes += $f['bytes'];
 $top = array_slice($ips, 0, 12);
 
 $logByHash = [];
-foreach ($logFiles as $path) { $decoded = readJsonFile($path); if ($decoded !== null) $logByHash[basename($path)] = $decoded; }
+if ($db !== null) {
+    $logByHash = $dbLogData;
+} else {
+    foreach ($logFiles as $path) { $decoded = readJsonFile($path); if ($decoded !== null) $logByHash[basename($path)] = $decoded; }
+}
 function findUserInfo(mixed $value): array {
     if (!is_array($value)) return [];
     if (isset($value['user_addr']) || isset($value['session']) || isset($value['data']) || isset($value['cookies'])) return $value;
