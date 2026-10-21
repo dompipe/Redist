@@ -40,10 +40,17 @@ final class SqliteStore {
             entry_key TEXT NOT NULL UNIQUE,
             position INTEGER NOT NULL,
             payload_json TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 0 CHECK(priority IN (0,1)),
             status TEXT NOT NULL DEFAULT 'queued',
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         )");
+        // In-place migration for databases created before soft IP priority existed.
+        $columns = $db->query('PRAGMA table_info(queue_entries)')->fetchAll(PDO::FETCH_ASSOC);
+        $hasPriority = false;
+        foreach ($columns as $column) if (($column['name'] ?? '') === 'priority') $hasPriority = true;
+        if (!$hasPriority) $db->exec('ALTER TABLE queue_entries ADD COLUMN priority INTEGER NOT NULL DEFAULT 0');
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_queue_status_priority_position ON queue_entries(status, priority, position)');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_queue_status_position ON queue_entries(status, position)');
         $db->exec("CREATE TABLE IF NOT EXISTS user_logs (
             log_key TEXT PRIMARY KEY,
