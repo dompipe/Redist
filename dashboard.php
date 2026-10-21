@@ -21,6 +21,7 @@ header('Referrer-Policy: no-referrer');
 
 $root = __DIR__;
 $dbPath = getenv('REDIST_SQLITE_PATH') ?: $root . '/server_logs/redist.sqlite3';
+$queueFile = $root . '/users.conf';
 $userDir = $root . '/user_logs'; // legacy fallback only
 $serverDir = $root . '/server_logs'; // legacy fallback only
 $now = time();
@@ -158,13 +159,13 @@ main{max-width:1240px;margin:auto;padding:26px 18px 48px}.top{display:flex;align
 </style></head><body><main>
 <header class="top"><div><div class="eyebrow">Redist / traffic observability</div><h1>Operations panel</h1><p>Read-only view of queue and output files</p></div><div class="stamp">Snapshot · <?=esc(date('Y-m-d H:i:s T', $now))?></div></header>
 <section class="grid">
-<div class="metric"><small>Queue backlog</small><strong><?=number_format($queueCount)?></strong><span class="sub">entries in users.conf</span></div>
+<div class="metric"><small>Queue backlog</small><strong><?=number_format($queueCount)?></strong><span class="sub">entries in SQLite queue</span></div>
 <div class="metric"><small>IP log files</small><strong><?=number_format(count($logFiles))?></strong><span class="sub">files in user_logs/</span></div>
 <div class="metric"><small>Unique IPs observed</small><strong><?=number_format(count($ipCounts))?></strong><span class="sub">only addresses present in JSON logs</span></div>
 <div class="metric"><small>Log storage</small><strong><?=esc(number_format(($logBytes+$serverBytes)/1024,1))?> <span style="font-size:15px">KB</span></strong><span class="sub">user + server output files</span></div>
 </section>
 <section class="panel bookshelf"><div class="panelhead"><div><h2>Front-of-line queue</h2><p>Bookshelf view · hover or focus a book to inspect available user details</p></div><span class="pill"><?=count($queueCards)?> IN LINE</span></div>
-<?php if (!$queueCards): ?><div class="shelfempty">The queue is empty, or users.conf could not be read as a JSON list.</div><?php else: ?><div class="shelf" aria-label="Queued users in line">
+<?php if (!$queueCards): ?><div class="shelfempty">The queue is empty, or SQLite queue has no entries.</div><?php else: ?><div class="shelf" aria-label="Queued users in line">
 <?php foreach ($queueCards as $book): ?><div class="book" tabindex="0" aria-label="Queue position <?=esc($book['position'])?>: <?=esc($book['label'])?>">
 <div class="booknum">Position <?=esc($book['position'])?></div><div class="bookname"><?=esc($book['label'])?></div><div class="bookmeta"><?=esc($book['known'] ? 'User details available' : 'Limited saved details')?></div>
 <div class="booktip" role="tooltip"><strong>Queue position <?=esc($book['position'])?></strong>
@@ -173,7 +174,7 @@ main{max-width:1240px;margin:auto;padding:26px 18px 48px}.top{display:flex;align
 <span><b>Referrer:</b> <?=esc($book['referer'] !== '' ? $book['referer'] : 'Not recorded')?></span>
 <span><b>Request fields:</b> <?=esc($book['request_keys'] ? implode(', ', $book['request_keys']) : 'None recorded')?></span>
 <span><b>Cookies:</b> <?=esc($book['cookie_count'])?> · <b>Sessions:</b> <?=esc($book['session_count'])?></span></div></div><?php endforeach; ?>
-</div><?php endif; ?><p class="foot">Order follows users.conf. Details are limited to fields already saved by Redist; queued identifiers that cannot be matched to a log stay anonymized.</p></section>
+</div><?php endif; ?><p class="foot">Order follows SQLite queue position. Details are limited to fields already saved by Redist; queued identifiers that cannot be matched to a log stay anonymized.</p></section>
 <section class="layout">
 <div class="panel"><div class="panelhead"><div><h2>Backlog wave</h2><p>Browser-local snapshots of queue + log-file counts</p></div><span class="pill">LIVE SNAPSHOT</span></div>
 <svg id="wave" class="chart" viewBox="0 0 720 210" role="img" aria-label="Backlog count history"><defs><linearGradient id="fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#53d8d1" stop-opacity=".28"/><stop offset="1" stop-color="#53d8d1" stop-opacity="0"/></linearGradient></defs><g id="gridlines" stroke="#24354a" stroke-width="1"></g><path id="area" fill="url(#fill)"></path><path id="line" fill="none" stroke="#53d8d1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path><circle id="dot" r="4" fill="#53d8d1"></circle><text id="current" x="700" y="20" fill="#e7eef8" text-anchor="end" font-size="13"></text></svg><div class="legend"><span>Oldest browser snapshot</span><span id="waveCount">1 sample</span><span>Latest</span></div><p class="foot">This trend is approximate: the repo's current output files do not contain a timestamped queue history. It resets when browser storage is cleared.</p></div>
@@ -184,7 +185,7 @@ main{max-width:1240px;margin:auto;padding:26px 18px 48px}.top{display:flex;align
 </section>
 <section class="panel" style="margin-top:12px"><div class="panelhead"><div><h2>Output files</h2><p>Files discovered from Redist's current output directories</p></div><span class="pill"><?=count($serverFiles)?> SERVER FILES</span></div>
 <div class="files"><?php if (!$serverFiles): ?><div class="empty">No files found in server_logs/.</div><?php else: foreach ($serverFiles as $f): ?><div class="file"><span><?=esc($f['name'])?></span><span class="sub"><?=esc(number_format($f['bytes']))?> B · <?=esc(date('M j H:i:s',$f['mtime']))?></span></div><?php endforeach; endif; ?></div>
-<p class="foot">Queue file: <?=is_file($queueFile)?'users.conf found':'users.conf missing'?> · User-log directory: <?=is_dir($userDir)?'available':'missing'?> · No files are modified by this panel.</p></section>
+<p class="foot">Storage: <?=($db !== null)?'SQLite connected':'legacy file fallback'?> · Database: <?=esc(basename($dbPath))?> · Read-only panel.</p></section>
 </main>
 <script>
 (() => {
