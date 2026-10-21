@@ -18,6 +18,7 @@ jobs:
         run: |
           php -l Redist/storage/SqliteStore.php
           php -l Redist/storage/SectionHealth.php
+          php -l Redist/storage/IpRangeGuard.php
           php -l Redist/storage/migrate.php
           php -l Redist/curl/WaveQueue.php
           php -l Redist/curl/curl.php
