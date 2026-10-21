@@ -71,9 +71,9 @@ $settingsNotice = '';
 $sectionSettings = ['failure_threshold'=>5,'recovery_successes'=>1,'history_limit'=>100,'stale_after_minutes'=>30];
 if ($db !== null) {
     try {
-        $sectionSettings = \\Redist\\storage\\SectionHealth::settings();
+        $sectionSettings = \Redist\storage\SectionHealth::settings();
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save_health_settings') {
-            $sectionSettings = \\Redist\\storage\\SectionHealth::saveSettings($_POST);
+            $sectionSettings = \Redist\storage\SectionHealth::saveSettings($_POST);
             $settingsNotice = 'Settings saved.';
         }
     } catch (Throwable $e) { $settingsNotice = 'Settings could not be saved: ' . $e->getMessage(); }
