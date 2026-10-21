@@ -47,7 +47,7 @@ if ($method === 'GET' || $method === 'HEAD') {
             'version' => 1,
             'operation' => 'enqueue',
             'request_id' => 'stable caller-generated idempotency key (16–128 characters)',
-            'section' => 'configured Redist section ID',
+            'section' => 'Redist section ID',
             'payload' => 'JSON object'
         ],
         'responses' => [
@@ -118,7 +118,7 @@ if (!is_string($requestId) || strlen($requestId) < 16 || strlen($requestId) > 12
 
 $section = $envelope['section'] ?? null;
 if (!is_string($section) || !preg_match('/^[a-z0-9][a-z0-9._:-]{0,159}$/', $section)) {
-    redist_nack(400, 'invalid_section', 'section must be a configured section ID using lowercase letters, digits, dot, underscore, colon, or hyphen.');
+    redist_nack(400, 'invalid_section', 'section must be a section ID using lowercase letters, digits, dot, underscore, colon, or hyphen.');
 }
 
 $payload = $envelope['payload'] ?? null;
