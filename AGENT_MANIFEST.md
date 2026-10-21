@@ -370,3 +370,43 @@ The AI's final report should include:
 - **Validation:** syntax and structural checks performed.
 
 When evidence is incomplete, provide a reviewable draft and ask only the specific questions needed to resolve material ambiguities. Never fabricate a complete site map from a domain name alone.
+
+
+## Section-aware behavioral intelligence and adaptive challenges
+
+Redist should evaluate behavior in context. A high-traffic article, search page, leaderboard, product listing, or infinite-scroll feed can legitimately generate far more requests than a quiet section. Do not apply a site-wide request threshold as if every section had the same normal workload.
+
+### Evidence model
+
+The BehavioralIntelligence scorer is an advisory component. It stores section ID, a pseudonymous first-party session key, normalized route key, event type, HTTP outcome, optional dwell time, and timestamp. Do not store raw query strings, page contents, form values, or credentials as route keys. Do not create covert device fingerprints. A random first-party session token can connect that browser's sessions when permitted, but IP addresses alone must not be used to infer that different visitors are the same person.
+
+Use these signals together:
+
+- **Section demand:** compare session request rate with an operator-reviewed baseline for that particular section.
+- **Navigation entropy:** measure route variety/repetition, but never treat low entropy alone as malicious; reading one article or scrolling one feed naturally has low route entropy.
+- **Cadence and persistence:** examine sustained rate and timing over multiple windows, not a single burst.
+- **Engagement:** when the site deliberately supplies click, navigation, scroll, or dwell-time events, use them as supporting evidence only. Missing browser telemetry is not proof of automation; support keyboard use, assistive technology, and privacy settings.
+- **Outcomes and impact:** consider non-2xx responses, queue growth, latency, and section-health incidents.
+- **Coordinated load:** aggregate section-wide surges and IP-range diversity to identify distributed load. This establishes a traffic pattern, not a shared human identity.
+
+### Decision policy
+
+The scorer returns a risk score, reasons, and one of allow, mitigate, or challenge. It does not block requests itself. A policy layer should:
+
+1. Allow normal or explainable activity.
+2. Prefer section-local rate shaping, bounded concurrency, caching, and backpressure for load spikes.
+3. Issue a privacy-respecting challenge only when multiple independent signals justify it.
+4. Escalate to a stronger challenge or temporary session limit only if suspicious behavior persists.
+5. Decay risk after the pattern stops and restore normal access after a recovery window.
+6. Never blacklist an entire IP range solely because it is busy; carrier NATs, shared networks, and changing addresses make that unsafe.
+7. Keep an auditable explanation of each action and a way to clear false positives.
+
+Entropy is not a fate score: a high or low value is merely one feature. The same repetitive behavior can be ordinary for one section and suspicious for another, depending on baseline, timing, outcomes, and service impact.
+
+### Operational limits and rollout
+
+- Current scorer storage is opt-in; the existing request path does not yet supply a complete, manifest-resolved section ID and trustworthy browser engagement events automatically.
+- Do not enable automatic challenges from the score until the application integrates event collection, manifest section resolution, section-specific baselines, retention/pruning, and an operator review panel.
+- Use a short rolling raw-event retention window, keep aggregate baselines separately, and disclose any first-party behavior telemetry in the site's privacy notice as appropriate.
+- Test legitimate heavy users, infinite scroll, article reading, keyboard/assistive navigation, search crawlers where permitted, distributed scraping, and recovery after load ceases.
+- Treat missing telemetry as unknown, not suspicious. Keep an explicit observe-only mode during rollout.
