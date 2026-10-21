@@ -16,17 +16,19 @@ function healthCheck(bool $ok, string $message): void {
 try {
     SqliteStore::db();
     SectionHealth::schema(SqliteStore::db());
+    $baseTime = time();
+    $at = static fn(int $offset): string => gmdate('Y-m-d\\TH:i:s\\Z', $baseTime + $offset);
     healthCheck(SectionHealth::status('public')['state'] === 'unknown', 'no traffic is unknown, not down');
-    SectionHealth::observe('public', 200, null, '2026-10-21T10:00:00Z');
+    SectionHealth::observe('public', 200, null, $at(0));
     healthCheck(SectionHealth::status('public')['state'] === 'healthy', '2xx marks section healthy');
     for ($i=1; $i<=4; $i++) {
-        $state = SectionHealth::observe('public', 503, null, '2026-10-21T10:01:0' . $i . 'Z');
+        $state = SectionHealth::observe('public', 503, null, $at($i));
         healthCheck($state['state'] !== 'down', 'outage threshold is not crossed early (' . $i . ')');
     }
-    $down = SectionHealth::observe('public', 503, null, '2026-10-21T10:01:05Z');
+    $down = SectionHealth::observe('public', 503, null, $at(5));
     healthCheck($down['state'] === 'down', 'consecutive non-2xx responses declare section down');
     healthCheck(count(SectionHealth::incidents('public')) === 1, 'downtime incident is persisted');
-    $up = SectionHealth::observe('public', 204, null, '2026-10-21T10:02:00Z');
+    $up = SectionHealth::observe('public', 204, null, $at(60));
     healthCheck($up['state'] === 'healthy', '2xx recovery closes outage');
     $incident = SectionHealth::incidents('public')[0];
     healthCheck($incident['status'] === 'recovered' && $incident['recovered_at'] !== null, 'recovery timestamp is recorded');
