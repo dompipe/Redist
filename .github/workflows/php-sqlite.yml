@@ -26,6 +26,8 @@ jobs:
           php -l Redist/curl/WaveQueue.php
           php -l Redist/curl/curl.php
           php -l Redist/files/filemngr.php
+          php -l Redist/files/AtomicFile.php
+          php -l tests/atomic_file_smoke.php
           php -l Redist/url/purl.php
           php -l dashboard.php
           php -l index.php
@@ -39,6 +41,7 @@ jobs:
       - name: SQLite smoke tests
         run: |
           php tests/sqlite_smoke.php
+          php tests/atomic_file_smoke.php
           php tests/section_health_smoke.php
           php tests/behavioral_intelligence_smoke.php
           php tests/ip_reputation_smoke.php
