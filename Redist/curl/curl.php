@@ -5,7 +5,7 @@ require_once __DIR__ . '/pcurls.php';
 require_once __DIR__ . '/WaveQueue.php';
 require_once dirname(__DIR__) . '/storage/SectionHealth.php';
 
-use Redist\\storage\\SectionHealth;
+use Redist\storage\SectionHealth;
 
 /**
  * Multi-cURL dispatcher with response collection and completion-gated waves.
