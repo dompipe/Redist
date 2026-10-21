@@ -95,7 +95,7 @@ final class BehavioralIntelligence {
         $sequence = array_reverse($sequence);
         $cyclePeriod = 0; $cycleRepetitions = 0;
         $sequenceCount = count($sequence);
-        if ($sequenceCount >= 9) {
+        if ($sequenceCount >= 9 && count(array_unique($sequence)) >= 2) {
             for ($period = 2; $period <= min(8, intdiv($sequenceCount, 3)); $period++) {
                 $matches = 0;
                 for ($i = $sequenceCount - 1; $i >= $period; $i--) {
