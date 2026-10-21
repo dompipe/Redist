@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace Redist\\files;
+namespace Redist\files;
 
 /**
  * Creates a file only when the destination does not already exist.
@@ -43,7 +43,7 @@ final class AtomicFile
                         'bytes' => $bytes,
                         'message' => $message,
                     ]);
-                } catch (\\Throwable $ignored) {
+                } catch (\Throwable $ignored) {
                     // Logging must never change the write result.
                 }
             }
@@ -72,6 +72,11 @@ final class AtomicFile
         $installed = false;
         $bytesWritten = 0;
         try {
+            $realDirectory = realpath($directory);
+            $realTemporaryDirectory = realpath(dirname($temporary));
+            if ($realDirectory === false || $realTemporaryDirectory !== $realDirectory) {
+                return $result(false, 'temp_wrong_directory', 'Temporary file was not created in the destination directory.');
+            }
             if (!@chmod($temporary, 0600)) {
                 return $result(false, 'temp_permission_failed', 'Could not restrict temporary file permissions.');
             }
@@ -116,7 +121,7 @@ final class AtomicFile
             }
             $installed = true;
             return $result(true, 'created', 'File created without overwriting an existing destination.', $bytesWritten);
-        } catch (\\Throwable $error) {
+        } catch (\Throwable $error) {
             return $result(false, 'exception', 'Unexpected file-write error: ' . get_class($error), $bytesWritten);
         } finally {
             if (is_file($temporary) || is_link($temporary)) {
