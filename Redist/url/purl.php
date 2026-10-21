@@ -253,7 +253,26 @@ class pURL implements pUser {
 
 	// ***
 	public static function spoof_check() {
-		
+		// Persist the source IP and its IPv4 A.B.C /24 range before admission.
+		// Use REMOTE_ADDR only; forwarded headers are not trusted by default.
+		$sourceIp = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+		if (filter_var($sourceIp, FILTER_VALIDATE_IP)) {
+			require_once dirname(__DIR__) . '/storage/IpRangeGuard.php';
+			try {
+				\\Redist\\storage\\IpRangeGuard::observe($sourceIp);
+				$blocked = \\Redist\\storage\\IpRangeGuard::isBlocked($sourceIp);
+				if ($blocked) {
+					http_response_code(403);
+					header('Content-Type: text/plain; charset=utf-8');
+					exit("Access denied by Redist IP blacklist.\\n");
+				}
+			} catch (\\Throwable $e) {
+				// Do not silently fail open if the blacklist cannot be checked.
+				error_log('Redist IP guard error: ' . $e->getMessage());
+				http_response_code(503);
+				exit("Redist admission guard temporarily unavailable.\\n");
+			}
+		}
 		if (file_exists("spoof_list"))
 			$pre_spoof_filter = file_get_contents("spoof_list");
 		else
