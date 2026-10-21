@@ -20,6 +20,7 @@ header('Cache-Control: no-store, max-age=0');
 header('Referrer-Policy: no-referrer');
 
 require_once __DIR__ . '/Redist/storage/SectionHealth.php';
+require_once __DIR__ . '/Redist/storage/IpRangeGuard.php';
 
 $root = __DIR__;
 $dbPath = getenv('REDIST_SQLITE_PATH') ?: $root . '/server_logs/redist.sqlite3';
@@ -128,6 +129,26 @@ if ($db !== null) {
 $serverBytes = 0;
 foreach ($serverFiles as $f) $serverBytes += $f['bytes'];
 $top = array_slice($ips, 0, 12);
+
+$ipGuardNotice = '';
+$ipBlacklistRows = [];
+$ipRangeRows = [];
+if ($db !== null) {
+    try {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ip_guard_action'])) {
+            $action = (string)$_POST['ip_guard_action'];
+            if ($action === 'blacklist') {
+                \\Redist\\storage\\IpRangeGuard::blacklist((string)($_POST['subject'] ?? ''), (string)($_POST['subject_type'] ?? 'ip'), (string)($_POST['reason'] ?? ''));
+                $ipGuardNotice = 'Blacklist entry saved.';
+            } elseif ($action === 'unblock') {
+                \\Redist\\storage\\IpRangeGuard::unblock((string)($_POST['subject'] ?? ''));
+                $ipGuardNotice = 'Blacklist entry disabled.';
+            }
+        }
+        $ipBlacklistRows = \\Redist\\storage\\IpRangeGuard::blacklistRows(200);
+        $ipRangeRows = \\Redist\\storage\\IpRangeGuard::topRanges(50);
+    } catch (Throwable $e) { $ipGuardNotice = 'IP guard operation failed: ' . $e->getMessage(); }
+}
 
 $sectionHealthRows = [];
 $downtimeRows = [];
@@ -249,7 +270,30 @@ main{max-width:1240px;margin:auto;padding:26px 18px 48px}.top{display:flex;align
       <?php endforeach; ?>
       </tbody></table></div>
   <?php endif; ?>
-</section><main>
+</section><section class="panel" style="margin:20px 0;padding:18px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#172033">
+  <h2 style="margin:0 0 8px">IP and A.B.C range guard</h2>
+  <p style="margin:0 0 12px;color:#475569">Incoming source addresses are recorded in SQLite and grouped into IPv4 A.B.C.0/24 ranges. Active individual-IP and /24 blacklist entries are enforced before queue admission.</p>
+  <?php if ($ipGuardNotice !== ''): ?><p role="status"><?=esc($ipGuardNotice)?></p><?php endif; ?>
+  <?php if ($db === null): ?><p>IP range tracking and blacklist management require SQLite.</p><?php else: ?>
+  <form method="post" action="?key=<?=rawurlencode($provided)?>" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;align-items:end">
+    <input type="hidden" name="ip_guard_action" value="blacklist">
+    <label>Address or range<input name="subject" required placeholder="203.0.113.8 or 203.0.113.0/24" style="display:block;width:100%;padding:9px;margin-top:5px"></label>
+    <label>Entry type<select name="subject_type" style="display:block;width:100%;padding:9px;margin-top:5px"><option value="ip">Single IP</option><option value="cidr">IPv4 A.B.C.0/24 range</option></select></label>
+    <label>Reason<input name="reason" maxlength="500" placeholder="Abuse / flood / manual review" style="display:block;width:100%;padding:9px;margin-top:5px"></label>
+    <button type="submit" style="padding:10px 16px;cursor:pointer">Blacklist</button>
+  </form>
+  <h3 style="margin:18px 0 8px">Top IPv4 ranges · last 24 hours</h3>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:8px">A.B.C range</th><th style="text-align:left;padding:8px">Hits</th><th style="text-align:left;padding:8px">Unique IPs</th><th style="text-align:left;padding:8px">Last seen (UTC)</th></tr></thead><tbody>
+  <?php if (!$ipRangeRows): ?><tr><td colspan="4" style="padding:8px">No incoming-IP observations recorded yet.</td></tr><?php else: foreach ($ipRangeRows as $range): ?><tr><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($range['range_cidr'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=number_format((int)$range['hits'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=number_format((int)$range['unique_ips'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($range['last_seen'])?></td></tr><?php endforeach; endif; ?>
+  </tbody></table></div>
+  <h3 style="margin:18px 0 8px">Blacklist entries</h3>
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:8px">Subject</th><th style="text-align:left;padding:8px">Type</th><th style="text-align:left;padding:8px">Reason</th><th style="text-align:left;padding:8px">Status</th><th style="text-align:left;padding:8px">Action</th></tr></thead><tbody>
+  <?php if (!$ipBlacklistRows): ?><tr><td colspan="5" style="padding:8px">No persistent blacklist entries.</td></tr><?php else: foreach ($ipBlacklistRows as $blocked): ?><tr><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($blocked['subject'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($blocked['subject_type'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=esc($blocked['reason'])?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?=((int)$blocked['active']===1)?'Active':'Disabled'?></td><td style="padding:8px;border-top:1px solid #e2e8f0"><?php if ((int)$blocked['active']===1): ?><form method="post" action="?key=<?=rawurlencode($provided)?>"><input type="hidden" name="ip_guard_action" value="unblock"><input type="hidden" name="subject" value="<?=esc($blocked['subject'])?>"><button type="submit">Unblock</button></form><?php else: ?>—<?php endif; ?></td></tr><?php endforeach; endif; ?>
+  </tbody></table></div>
+  <?php endif; ?>
+  <p class="foot">Blocking a /24 can affect many legitimate users behind shared NAT. Review range counts before blocking it. IPv6 is tracked per address; prefix blocking is not enabled.</p>
+</section>
+<main>
 <header class="top"><div><div class="eyebrow">Redist / traffic observability</div><h1>Operations panel</h1><p>Read-only view of queue and output files</p></div><div class="stamp">Snapshot · <?=esc(date('Y-m-d H:i:s T', $now))?></div></header>
 <section class="grid">
 <div class="metric"><small>Queue backlog</small><strong><?=number_format($queueCount)?></strong><span class="sub">entries in SQLite queue</span></div>
