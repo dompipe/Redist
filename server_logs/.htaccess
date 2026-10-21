@@ -1,0 +1,2 @@
+# Redist runtime data must never be served directly.
+Require all denied
