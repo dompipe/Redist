@@ -88,7 +88,11 @@ $sectionId=$e['section']??null;
 if (!is_string($sectionId)||!preg_match('/^[a-z0-9][a-z0-9._:-]{0,159}$/',$sectionId)) redist_nack(400,'invalid_section','section must be a valid section ID.');
 $payload=$e['payload']??null;
 if (!is_array($payload)||(array_is_list($payload)&&$payload!==[])) redist_nack(400,'invalid_payload','payload must be a JSON object.');
-$path=$payload['path']??'/';
+$rewrittenPath = $_SERVER['REDIRECT_REDIST_ORIGINAL_PATH']
+    ?? $_SERVER['REDIST_ORIGINAL_PATH']
+    ?? $_SERVER['REDIRECT_REDIRECT_REDIST_ORIGINAL_PATH']
+    ?? null;
+$path = $payload['path'] ?? (is_string($rewrittenPath) && $rewrittenPath !== '' ? $rewrittenPath : '/');
 if (!is_string($path)||$path===''||$path[0]!=='/'||str_starts_with($path,'//')||str_contains($path,'\\')||preg_match('/[\r\n]/',$path)||preg_match('#(?:^|/)\.{1,2}(?:/|$)#',$path)||preg_match('/%(?:2f|5c|2e)/i',$path)) redist_nack(400,'invalid_path','payload.path must be a canonical same-origin absolute path without dot segments or encoded separators.');
 if (isset($payload['query'])&&(!is_array($payload['query'])||(array_is_list($payload['query'])&&$payload['query']!==[]))) redist_nack(400,'invalid_query','payload.query must be an object.');
 $data=$payload['data']??[];
@@ -131,7 +135,14 @@ if ($captchaRequired) {
     }
 }
 $url=rtrim($section['target_origin'],'/').$path;
-if (!empty($payload['query'])) $url.='?'.http_build_query($payload['query']);
+if (array_key_exists('query', $payload)) {
+    if (!empty($payload['query'])) $url .= '?' . http_build_query($payload['query']);
+} else {
+    // In front-controller mode preserve the original raw query string exactly
+    // when the dispatch envelope does not supply an explicit query object.
+    $incomingQuery = (string)($_SERVER['QUERY_STRING'] ?? '');
+    if ($incomingQuery !== '') $url .= '?' . $incomingQuery;
+}
 $entry=['protocol_version'=>1,'request_id'=>$id,'section'=>$sectionId,'operation'=>'dispatch','payload'=>$payload,'metadata'=>is_array($e['metadata']??null)?$e['metadata']:new stdClass(),'_redist_target_url'=>$url];
 $json=json_encode($entry,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
 $key='api:'.hash('sha256',$id);
