@@ -96,7 +96,7 @@ final class SqliteStore {
             foreach (array_values((array)$entries) as $position => $entry) {
                 $payload = json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                 if ($payload === false) continue;
-                $key = is_string($entry) ? 'legacy:' . $entry : 'entry:' . hash('sha256', $payload);
+                $key = is_string($entry) ? 'legacy:' . $entry : 'entry:' . $position . ':' . hash('sha256', $payload);
                 $q->execute([$key, $position, $payload]);
             }
             $db->commit();
