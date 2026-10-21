@@ -601,8 +601,10 @@ Rules:
 - `captcha` must be a JSON boolean, not the strings `"true"` or `"false"`.
 - `file_policies` is an object keyed by exact absolute request path. Each entry must contain a boolean `captcha`.
 - An exact file/path setting overrides the section-level `captcha` value. If no exact override exists, the section value applies.
-- `captcha_required` is returned in the queue-admission response so the policy layer can decide whether to require a challenge.
-- Query strings are not part of the file-policy key; matching uses the validated `payload.path` only.
+- The effective policy is resolved before queue admission. If CAPTCHA is required and the current PHP session has no valid pass for that exact section and path, ingress returns HTTP 403 with `type: "CHALLENGE"` and a `challenge_url`; it does not insert the request into SQLite or dispatch it.
+- After completing the numeric challenge in the same browser/session, retry the original POST with the same session cookie. A pass is session-bound, expires after 30 minutes, and is bound to the exact section/path pair; it does not unlock other paths.
+- Successful admission ACKs include `captcha_required`. A challenge response is not an admission ACK.
+- Query strings are not part of the file-policy key; matching uses the validated `payload.path` only. Ambiguous paths containing dot segments, backslashes, or encoded separators are rejected to prevent path-normalization bypasses.
 - Invalid policy values cause the manifest section to be rejected with HTTP 503.
 
-**Enforcement status:** the manifest flag is now parsed and resolved at ingress, but the numeric CAPTCHA has not yet been integrated as a mandatory gate before queue admission. Until that wiring and pass-token/session validation are implemented, `captcha_required` is a policy signal, not proof that a challenge was completed. Do not rely on the flag alone to protect a sensitive endpoint.
+**Deployment limits:** this enforcement applies to requests entering through the root `index.php` JSON dispatch endpoint. It does not automatically protect direct requests to the destination website or wire the numeric challenge into the separate legacy `pURL::spoof_check()` / Cloudflare Turnstile path. Enable PHP sessions and GD, serve the challenge over HTTPS, and configure secure session cookies. API clients must preserve the same session cookie while completing the challenge and retrying. CAPTCHA is friction, not a substitute for edge/WAF limits or bounded queue admission.
