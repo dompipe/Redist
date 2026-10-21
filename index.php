@@ -89,7 +89,7 @@ if (!is_string($sectionId)||!preg_match('/^[a-z0-9][a-z0-9._:-]{0,159}$/',$secti
 $payload=$e['payload']??null;
 if (!is_array($payload)||(array_is_list($payload)&&$payload!==[])) redist_nack(400,'invalid_payload','payload must be a JSON object.');
 $path=$payload['path']??'/';
-if (!is_string($path)||$path===''||$path[0]!=='/'||str_starts_with($path,'//')||preg_match('/[\r\n]/',$path)) redist_nack(400,'invalid_path','payload.path must be a same-origin absolute path beginning with one slash.');
+if (!is_string($path)||$path===''||$path[0]!=='/'||str_starts_with($path,'//')||str_contains($path,'\\')||preg_match('/[\r\n]/',$path)||preg_match('#(?:^|/)\.{1,2}(?:/|$)#',$path)||preg_match('/%(?:2f|5c|2e)/i',$path)) redist_nack(400,'invalid_path','payload.path must be a canonical same-origin absolute path without dot segments or encoded separators.');
 if (isset($payload['query'])&&(!is_array($payload['query'])||(array_is_list($payload['query'])&&$payload['query']!==[]))) redist_nack(400,'invalid_query','payload.query must be an object.');
 $data=$payload['data']??[];
 if (!is_array($data)||(array_is_list($data)&&$data!==[])) redist_nack(400,'invalid_data','payload.data must be a JSON object.');
