@@ -454,3 +454,12 @@ Manifest example (replace the example hostname with a destination you own and in
 ```
 
 Do not use the example hostname as a production destination without replacing it.
+
+
+## Unknown-section health probes
+
+The scheduled `bin/dispatch-queue.php` worker also checks section health. When a section has no recent observed traffic/response, its health is `unknown`; the worker sends a lightweight GET to the configured `target_origin` at most once every 300 seconds. The probe uses only the manifest origin, follows no redirects, validates TLS certificates, and has a 5-second connect / 10-second total timeout.
+
+A 2xx probe records the section as healthy. A non-2xx response, timeout, invalid destination, or unavailable cURL is recorded as a failed observation; the section is not marked healthy. Unknown, suspected-down, and down sections are probed again after the five-minute interval so a later successful response can record recovery. Healthy sections are not probed continuously; normal health becomes unknown again if its observations become stale under `stale_after_minutes`.
+
+The five-minute schedule depends on the CLI worker being run independently of traffic. On cPanel, schedule `php /absolute/path/to/Redist/bin/dispatch-queue.php` with cron; one-minute cron granularity means probes happen on the first worker run after the five-minute interval has elapsed.
