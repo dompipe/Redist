@@ -61,8 +61,13 @@ final class SectionHealth {
             $q = $db->prepare('INSERT INTO section_health_events(section_id,observed_at,http_code,error,is_success) VALUES(?,?,?,?,?)');
             $q->execute([$sectionId, $at, $httpCode, $error, $success ? 1 : 0]);
             if ($success) {
-                $q = $db->prepare("UPDATE section_downtime SET status='recovered', recovered_at=?, recovery_http_code=? WHERE section_id=? AND status='open'");
-                $q->execute([$at, $httpCode, $sectionId]);
+                $recoverySuccesses = self::settings()['recovery_successes'];
+                $q = $db->prepare("SELECT COUNT(*) FROM (SELECT is_success FROM section_health_events WHERE section_id=? ORDER BY id DESC LIMIT " . (int)$recoverySuccesses . ") WHERE is_success=1");
+                $q->execute([$sectionId]);
+                if ((int)$q->fetchColumn() >= $recoverySuccesses) {
+                    $q = $db->prepare("UPDATE section_downtime SET status='recovered', recovered_at=?, recovery_http_code=? WHERE section_id=? AND status='open'");
+                    $q->execute([$at, $httpCode, $sectionId]);
+                }
             } else {
                 $q = $db->prepare("SELECT id, observed_at FROM section_health_events WHERE section_id=? ORDER BY id DESC LIMIT " . (int)$failureThreshold);
                 $q->execute([$sectionId]);
@@ -106,7 +111,10 @@ final class SectionHealth {
         $q = $db->prepare("SELECT * FROM section_downtime WHERE section_id=? ORDER BY id DESC LIMIT 1");
         $q->execute([$sectionId]);
         $incident = $q->fetch() ?: null;
-        if (!$events) $state = 'unknown';
+        $settings = self::settings();
+        $lastObserved = $events[0]['observed_at'] ?? null;
+        $isStale = $lastObserved !== null && (strtotime($lastObserved) === false || (time() - strtotime($lastObserved)) > ((int)$settings['stale_after_minutes'] * 60));
+        if (!$events || $isStale) $state = 'unknown';
         elseif ($incident && $incident['status'] === 'open') $state = 'down';
         elseif ((int)$events[0]['is_success'] === 1) $state = 'healthy';
         else $state = 'suspected_down';
