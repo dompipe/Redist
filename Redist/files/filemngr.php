@@ -27,6 +27,10 @@ class filemngr implements files {
     }
 
     public static function get_user_log($key = null) {
+        if (is_array($key)) {
+            $addr = $key['user_addr'] ?? null;
+            $key = is_string($addr) ? hash('sha256', $addr) : null;
+        }
         return SqliteStore::getUserLog($key ?: self::currentKey());
     }
 
