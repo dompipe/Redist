@@ -1,8 +1,7 @@
 <?php
 namespace Redist\curl;
 
-include_once 'pcurls.php';
-include_once 'static_curls.php';
+require_once __DIR__ . '/pcurls.php';
 
 /**
  * Multi-cURL dispatcher with response collection and completion-gated waves.
