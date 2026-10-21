@@ -138,6 +138,111 @@ The generated manifest must use deterministic, non-overlapping routing:
 7. Preserve query strings for the request itself, but do not use query parameters to define section boundaries unless the owner specifically requires it.
 8. Do not treat the HTTP `Referer` as authoritative routing identity. Route using the request's validated host and path.
 
+## Spoke-based coordination for high traffic
+
+The manifest should describe a **coordinator with independent section spokes**. A spoke is a logical dispatch lane owned by one section (or explicitly configured subsection), not a page and not necessarily a separate server. The coordinator resolves a request to one section/spoke, admits it once, and tracks wave state; spokes process bounded work independently so a busy shop or API does not stall the public site.
+
+This is a scale-ready design target, not a claim that the current Redist runtime already implements it.
+
+### Responsibilities
+
+- **Coordinator:** validates the manifest version, resolves host/path to exactly one section, assigns a stable request ID, enforces admission policy, and records the durable queue decision.
+- **Section spoke:** owns that section's queue partition, active-wave lease, concurrency budget, and completion state. It may run on one process or be consumed by several workers using atomic claims.
+- **Workers:** claim work from a spoke using a lease/visibility timeout and heartbeat; a worker must not dispatch an item whose claim is held by another live worker.
+- **Shared durable store:** is the source of truth for request identity, queue state, wave membership, leases, attempts, and outcomes. In-memory counters or process-local locks alone are not sufficient when multiple processes or hosts are running.
+- **Observer/operations view:** exposes queue depth, oldest-item age, active wave, in-flight count, throughput, latency, retries, failures, lease expiry, and rejected/admission-limited requests per spoke.
+
+### Manifest policy for spokes
+
+For each section, describe policy rather than hard-coding a machine topology:
+
+- A stable spoke ID (default to the section ID when one section has one spoke).
+- A bounded max-in-flight count and max requests per wave.
+- Optional requests-per-second or token-bucket rate limit, scoped to the destination/section and configured conservatively.
+- A bounded queue or explicit overflow policy (reject, defer, or owner-approved durable spillover); never silently drop admitted work.
+- A fair scheduling policy across spokes, such as round-robin or weighted fair scheduling, so one hot section cannot monopolize shared workers.
+- A lease duration, heartbeat interval, and retry budget with backoff; expired leases must be recoverable without allowing two workers to dispatch the same logical request.
+- A circuit-breaker policy for sustained destination errors/timeouts, plus a clear half-open/recovery procedure.
+- A completion policy that says whether every member must succeed, whether explicitly retryable failures can be retried in the same wave, and when a wave becomes blocked.
+- Optional dependencies only when explicitly declared. Do not make all spokes wait for a site-wide barrier by default.
+
+Keep limits finite. If traffic estimates and destination capacity are unknown, use conservative proposed values, mark them as unmeasured, and require review before activation. Do not set concurrency based only on CPU count: the constrained resource may be the destination, network, database, PHP worker pool, or external service.
+
+### Coordination invariants under load
+
+1. **Atomic admission:** persist the idempotency key and queue entry in one transaction. Concurrent duplicate submissions must resolve to the same logical request, not create parallel dispatches.
+2. **Atomic claim:** use a transactional claim or compare-and-swap lease so only one worker owns an item at a time. A timeout alone does not prove the previous worker stopped.
+3. **Fenced leases:** increment a lease/fencing token on reassignment; a stale worker must not be allowed to overwrite a newer worker's outcome.
+4. **Durable wave membership:** persist membership before dispatch and record each result idempotently. A process crash must not erase the wave's state.
+5. **Bounded fan-out:** each wave and spoke has explicit concurrency and rate ceilings. Backpressure must reach admission before memory or the database is overwhelmed.
+6. **Fairness and isolation:** schedule ready spokes fairly; pause or throttle one failing/hot spoke without freezing unrelated spokes.
+7. **Retry safety:** retry only according to the destination contract. Exactly-once network delivery cannot be guaranteed by a queue alone; use destination idempotency support where available and report ambiguous outcomes as indeterminate rather than blindly replaying them.
+8. **Database discipline:** keep transactions short; do not hold a database write transaction open during network I/O. Use indexes for status/section/position/next-attempt queries and test lock contention with multiple workers.
+9. **Graceful recovery:** on restart, recover expired leases, preserve blocked waves, and reconcile any dispatch whose remote result is unknown. Never mark queued, claimed, or timed-out work as served without the configured success evidence.
+10. **Operational limits:** bound payload size, queue retention, attempts, log growth, and per-spoke backlog. Provide explicit retention and dead-letter/review behavior.
+
+### Suggested manifest extension
+
+These fields are a proposed schema until the runtime validates and enforces them. They express logical coordination policy, not a demand to deploy one machine per spoke:
+
+\`\`\`json
+{
+  "version": 1,
+  "coordination": {
+    "mode": "section-spokes",
+    "admission": "atomic-idempotent",
+    "scheduler": "weighted-fair",
+    "max_global_in_flight": 40,
+    "unmatched": "reject"
+  },
+  "sections": {
+    "shop": {
+      "spoke": {
+        "id": "shop",
+        "max_in_flight": 12,
+        "max_requests_per_second": 8,
+        "queue": {
+          "max_pending": 20000,
+          "overflow": "defer"
+        },
+        "lease": {
+          "seconds": 60,
+          "heartbeat_seconds": 15
+        },
+        "retry": {
+          "max_attempts": 4,
+          "backoff": "exponential-jitter"
+        },
+        "circuit_breaker": {
+          "failure_threshold": 8,
+          "cooldown_seconds": 30
+        }
+      },
+      "wave": {
+        "max_requests": 100,
+        "completion": "all_success"
+      }
+    }
+  }
+}
+\`\`\`
+
+The numbers above are examples only, not recommended production limits. Validate that global limits are at least as restrictive as the sum of section budgets where shared workers/resources require it. The runtime must reject unknown or unsupported settings rather than silently ignoring them.
+
+### Load-readiness checks
+
+Before describing a deployment as ready for heavy traffic, test and report:
+
+- Concurrent duplicate admission and simultaneous workers claiming the same queue.
+- Process termination after claim, during network I/O, and after remote success but before local acknowledgement.
+- Queue growth, bounded-memory behavior, database lock contention, and backpressure at configured limits.
+- Fair progress when one spoke is continuously busy and another has a small queue.
+- Destination throttling, timeouts, retry storms, circuit-breaker recovery, and dead-letter visibility.
+- Restart/recovery of leases and blocked waves.
+- Metrics and alerts for queue age, backlog growth, failure rate, saturation, and stalled spokes.
+
+A manifest alone cannot make a system high-traffic-ready. The implementation, storage engine, deployment topology, destination contract, and load tests must all support these invariants.
+
 ## Wave policy
 
 The design target is **one active wave per section**, not one global wave for the entire site and not one wave for every individual page.
