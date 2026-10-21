@@ -100,7 +100,7 @@ final class SqliteStore {
                 $q->execute([$key, $position, $payload]);
             }
             $db->commit();
-        } catch (\\Throwable $e) {
+        } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
