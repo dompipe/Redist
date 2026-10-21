@@ -30,6 +30,57 @@ Use available evidence in this order, recording the sources inspected:
 
 Do not assume that a hostname exists merely because it seems conventional. Do not infer private or unlisted subdomains from names alone. Do not scan or probe systems without authorization. If the AI cannot access a source, mark it unavailable and continue with the remaining evidence.
 
+## Convert an existing sitemap into a manifest
+
+Sitemap conversion is a first-class input mode. If the user supplies a sitemap URL or file, the AI should parse it and use it as the starting inventory for `redist.manifest.json`, rather than requiring the user to manually list every section.
+
+### Sitemap input and discovery
+
+1. Accept a local sitemap XML file, a `.xml.gz` sitemap, a sitemap index, or a sitemap URL supplied by the user.
+2. If authorized and network access is available, check the site's `robots.txt` for declared sitemap locations. Do not probe guessed private URLs or crawl beyond the supplied/declared sitemap scope.
+3. Handle both a standard `urlset` and a `sitemapindex`. For an index, recursively process its listed child sitemaps, with duplicate detection and a reasonable configurable limit to prevent loops or unbounded downloads.
+4. Parse XML safely: disable external entity resolution and do not execute or fetch XML entities. Apply limits to download size, decompressed size, URL count, and redirects.
+5. Extract each `loc` URL. Treat `lastmod`, `changefreq`, and `priority` as optional metadata only; they do not define section boundaries or prove that a page is active.
+6. Record invalid URLs, unsupported sitemap formats, fetch failures, and limit-exceeded files in the conversion report. Do not silently discard them.
+7. Normalize URLs for comparison: lowercase scheme and hostname, remove default ports and hostname trailing dots, and normalize empty paths to `/`. Preserve meaningful path case and query strings in the source inventory; do not assume query strings are part of section identity.
+8. Deduplicate equivalent URLs for inventory purposes, but retain a count and examples of duplicates in the report. Do not use URL deduplication as the runtime's request idempotency mechanism.
+
+### Derive candidate sections from sitemap URLs
+
+For every valid `loc`, extract the hostname and path. Build a route inventory grouped by hostname, then identify candidate path prefixes:
+
+- Distinct hostnames in the sitemap are evidence of those hostnames, but not proof that each requires an independent section.
+- For each hostname, summarize the paths and common directory prefixes (for example, `/shop/products/...`, `/shop/orders/...`, `/help/...`).
+- Prefer a small number of meaningful high-level sections over one section per URL. Do not create a separate section for every product, article, pagination page, or individual file.
+- Use router/deployment documentation, navigation, sitemap grouping, and user guidance to decide whether a prefix is a true logical section.
+- If the sitemap provides no reliable semantic boundary, create a provisional section per evidenced hostname and leave path-level subdivisions unconfirmed rather than inventing business meanings.
+- A URL path of `/` is a root match, not a literal directory that should accidentally swallow every more-specific route. Use the manifest's documented matching semantics and explicit precedence.
+- Sitemaps commonly omit login-only pages, APIs, temporary pages, and some subdomains. Never interpret absence from the sitemap as proof that a route does not exist.
+
+### Convert, validate, and report
+
+1. Create a source inventory containing each URL's normalized hostname/path and its source sitemap.
+2. Generate candidate section rules that cover every valid sitemap URL exactly once.
+3. Check overlapping host/path rules and test each sitemap URL against the proposed rules. Report URLs that match zero or multiple sections.
+4. Keep source provenance in the report. If the manifest schema supports metadata, include a compact evidence note such as `sitemap: https://example.com/sitemap.xml`; do not copy the entire URL inventory into the manifest unless requested.
+5. Validate the output JSON and the manifest structure. If there are many URLs, report counts and representative examples instead of flooding the final response with every URL.
+6. Clearly separate **observed facts** (URLs found in sitemap) from **inferred candidates** (logical section names and wave settings).
+7. Treat wave limits and completion policies as proposals unless established by the owner or tested runtime defaults.
+8. If the user provides only a sitemap file, produce a draft manifest and conversion report from that file; do not require live-site access. Ask a clarifying question only when an ambiguity materially changes the section boundaries.
+
+### Sitemap conversion report
+
+Include:
+
+- Sitemaps processed and whether each was supplied, discovered, or referenced by an index.
+- URL count: discovered, valid, duplicate, and rejected.
+- Hostnames observed, with counts per hostname.
+- Proposed sections and the host/path rules covering each.
+- Any sitemap URLs not matched exactly once.
+- Candidate boundaries that need human confirmation.
+- Fetch/XML/size-limit errors and unsupported metadata.
+- Runtime compatibility: whether Redist can currently load and enforce the generated manifest.
+
 ## How to identify sections
 
 A **section** is a group of requests that should share queue coordination and a wave-completion gate because they belong to the same logical site area.
