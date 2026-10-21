@@ -121,6 +121,51 @@ final class SectionHealth {
         return ['section_id'=>$sectionId, 'state'=>$state, 'observations'=>count($events), 'last_observed_at'=>$events[0]['observed_at'] ?? null, 'last_http_code'=>$events[0]['http_code'] ?? null, 'last_error'=>$events[0]['error'] ?? null, 'incident'=>$incident];
     }
 
+    /** Return persisted section-health thresholds, initializing defaults if needed. */
+    public static function settings(): array {
+        $db = SqliteStore::db();
+        self::schema($db);
+        $rows = $db->query('SELECT setting_key,setting_value FROM redist_settings')->fetchAll(PDO::FETCH_ASSOC);
+        $values = [];
+        foreach ($rows as $row) $values[(string)$row['setting_key']] = (int)$row['setting_value'];
+        return [
+            'failure_threshold'=>max(1,min(1000,$values['failure_threshold'] ?? 5)),
+            'recovery_successes'=>max(1,min(100,$values['recovery_successes'] ?? 1)),
+            'history_limit'=>max(10,min(1000,$values['history_limit'] ?? 100)),
+            'stale_after_minutes'=>max(1,min(10080,$values['stale_after_minutes'] ?? 30))
+        ];
+    }
+
+    /** Validate and persist the operator-editable health policy. */
+    public static function saveSettings(array $input): array {
+        $limits = [
+            'failure_threshold'=>[1,1000,5],
+            'recovery_successes'=>[1,100,1],
+            'history_limit'=>[10,1000,100],
+            'stale_after_minutes'=>[1,10080,30]
+        ];
+        $db = SqliteStore::db();
+        self::schema($db);
+        $current = self::settings();
+        $db->beginTransaction();
+        try {
+            $q = $db->prepare("INSERT INTO redist_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')");
+            foreach ($limits as $key=>$limit) {
+                [$min,$max,$default] = $limit;
+                $raw = $input[$key] ?? $current[$key] ?? $default;
+                if (!is_numeric($raw)) throw new RuntimeException('Invalid section-health setting: ' . $key);
+                $value = (int)$raw;
+                if ($value < $min || $value > $max) throw new RuntimeException('Out-of-range section-health setting: ' . $key);
+                $q->execute([$key,(string)$value]);
+            }
+            $db->commit();
+        } catch (\\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        return self::settings();
+    }
+
     public static function incidents(?string $sectionId = null, int $limit = 100): array {
         $db = SqliteStore::db();
         self::schema($db);
