@@ -82,6 +82,58 @@ final class SqliteStore {
         )");
     }
 
+    public static function queueRows() {
+        $q = self::db()->query("SELECT entry_key,payload_json,status,position FROM queue_entries WHERE status='queued' ORDER BY position,id");
+        return $q->fetchAll();
+    }
+
+    public static function replaceQueue($entries) {
+        $db = self::db();
+        $db->beginTransaction();
+        try {
+            $db->exec("DELETE FROM queue_entries WHERE status='queued'");
+            $q = $db->prepare("INSERT INTO queue_entries(entry_key,position,payload_json,status) VALUES(?,?,?,'queued')");
+            foreach (array_values((array)$entries) as $position => $entry) {
+                $payload = json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if ($payload === false) continue;
+                $key = is_string($entry) ? 'legacy:' . $entry : 'entry:' . hash('sha256', $payload);
+                $q->execute([$key, $position, $payload]);
+            }
+            $db->commit();
+        } catch (\\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    public static function enqueue($entry, $key = null) {
+        $payload = json_encode($entry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($payload === false) throw new RuntimeException('Queue entry is not JSON encodable.');
+        $key = $key ?: (is_string($entry) ? 'legacy:' . $entry : 'entry:' . hash('sha256', $payload));
+        $db = self::db();
+        $q = $db->prepare("INSERT OR IGNORE INTO queue_entries(entry_key,position,payload_json,status) VALUES(?,?,?,'queued')");
+        $position = (int)$db->query("SELECT COALESCE(MAX(position),-1)+1 FROM queue_entries WHERE status='queued'")->fetchColumn();
+        $q->execute([$key, $position, $payload]);
+        return $db->lastInsertId();
+    }
+
+    public static function getUserLog($key) {
+        $q = self::db()->prepare('SELECT payload_json FROM user_logs WHERE log_key=?');
+        $q->execute([(string)$key]);
+        $raw = $q->fetchColumn();
+        if ($raw === false) return false;
+        $data = json_decode($raw, true);
+        return json_last_error() === JSON_ERROR_NONE ? $data : false;
+    }
+
+    public static function saveUserLog($key, $payload) {
+        $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($json === false) throw new RuntimeException('User log is not JSON encodable.');
+        $q = self::db()->prepare("INSERT INTO user_logs(log_key,payload_json) VALUES(?,?)
+            ON CONFLICT(log_key) DO UPDATE SET payload_json=excluded.payload_json,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')");
+        $q->execute([(string)$key,$json]);
+    }
+
     public static function decodeJsonFile($path) {
         $raw = @file_get_contents($path);
         if ($raw === false) return null;
