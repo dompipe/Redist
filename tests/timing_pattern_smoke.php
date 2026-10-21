@@ -4,7 +4,7 @@ require_once __DIR__ . '/../Redist/storage/SqliteStore.php';
 require_once __DIR__ . '/../Redist/storage/BehavioralIntelligence.php';
 use Redist\storage\SqliteStore;
 use Redist\storage\BehavioralIntelligence;
-$db = sys_get_temp_dir() . '/redist-timing-smoke.sqlite3';
+$db = sys_get_temp_dir() . '/redist-timing-smoke-' . bin2hex(random_bytes(5)) . '.sqlite3';
 putenv('REDIST_SQLITE_PATH=' . $db);
 SqliteStore::db();
 BehavioralIntelligence::setBaseline('timing-test', 1000);
