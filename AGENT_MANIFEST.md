@@ -482,7 +482,7 @@ The response from a newly admitted request includes `priority` and a small `ip_r
 
 ## Overwrite-protected atomic file creation
 
-Use `Redist\\files\\AtomicFile::writeOnce($destination, $contents, $logger, $mode)` when Redist needs to create a text/configuration artifact that must never replace an existing file. The helper writes to a temporary file in the destination directory, flushes it, applies the requested permissions, and uses an atomic hard-link install. If the destination already exists (including a symlink), it returns `already_exists` and leaves that destination unchanged. It never falls back to `rename()`, because rename can overwrite a destination on Unix.
+Use `Redist\files\AtomicFile::writeOnce($destination, $contents, $logger, $mode)` when Redist needs to create a text/configuration artifact that must never replace an existing file. The helper writes to a temporary file in the destination directory, flushes it, applies the requested permissions, and uses an atomic hard-link install. If the destination already exists (including a symlink), it returns `already_exists` and leaves that destination unchanged. It never falls back to `rename()`, because rename can overwrite a destination on Unix.
 
 The result includes `ok`, `code`, `path`, `bytes`, and a safe diagnostic `message`. An optional logger callback receives `(level, event, context)`; file contents are never included. Logger failures are caught and do not change the write result. The default mode is `0600`; callers may request a narrower permission mode such as `0640` when another trusted process needs read access.
 
