@@ -45,6 +45,21 @@ function redist_section(array $manifest, string $id): array {
         redist_nack(503, 'invalid_section_protection', 'Manifest section protection must be "protect" or "no-protect".', ['section' => $id]);
     }
     $section['protection'] = $protection;
+
+    // CAPTCHA can be enabled/disabled for an entire section and overridden
+    // for exact request paths ("files") within that section.
+    if (array_key_exists('captcha', $section) && !is_bool($section['captcha'])) {
+        redist_nack(503, 'invalid_section_captcha', 'Manifest section captcha must be true or false.', ['section' => $id]);
+    }
+    $section['captcha'] = $section['captcha'] ?? false;
+    if (isset($section['file_policies']) && (!is_array($section['file_policies']) || ($section['file_policies'] !== [] && array_is_list($section['file_policies'])))) {
+        redist_nack(503, 'invalid_file_policies', 'Manifest file_policies must be an object keyed by exact request path.', ['section' => $id]);
+    }
+    foreach (($section['file_policies'] ?? []) as $filePath => $policy) {
+        if (!is_string($filePath) || $filePath === '' || $filePath[0] !== '/' || str_starts_with($filePath, '//') || preg_match('/[\\r\\n]/', $filePath) || !is_array($policy) || !array_key_exists('captcha', $policy) || !is_bool($policy['captcha'])) {
+            redist_nack(503, 'invalid_file_policy', 'Each file_policies entry must use an exact absolute path and a boolean captcha value.', ['section' => $id]);
+        }
+    }
     return $section;
 }
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
@@ -79,6 +94,10 @@ if (isset($payload['query'])&&(!is_array($payload['query'])||(array_is_list($pay
 $data=$payload['data']??[];
 if (!is_array($data)||(array_is_list($data)&&$data!==[])) redist_nack(400,'invalid_data','payload.data must be a JSON object.');
 try {$manifest=redist_load_manifest();$section=redist_section($manifest,$sectionId);} catch(JsonException $x) {redist_nack(503,'manifest_invalid','The manifest is invalid JSON; no request was sent.');} catch(Throwable $x) {error_log('Redist manifest error: '.$x->getMessage());redist_nack(503,'manifest_unavailable','The manifest is unavailable or invalid; no request was sent.');}
+$captchaRequired = (bool)$section['captcha'];
+if (isset($section['file_policies'][$path])) {
+    $captchaRequired = (bool)$section['file_policies'][$path]['captcha'];
+}
 $url=rtrim($section['target_origin'],'/').$path;
 if (!empty($payload['query'])) $url.='?'.http_build_query($payload['query']);
 $entry=['protocol_version'=>1,'request_id'=>$id,'section'=>$sectionId,'operation'=>'dispatch','payload'=>$payload,'metadata'=>is_array($e['metadata']??null)?$e['metadata']:new stdClass(),'_redist_target_url'=>$url];
@@ -119,4 +138,4 @@ try {
     $ins->execute([$key,$position,$json,$priority,$deferUntilWave]);$db->commit();
 } catch(Throwable $x) {if(isset($db)&&$db instanceof PDO&&$db->inTransaction())$db->rollBack();error_log('Redist admission error: '.$x->getMessage());redist_nack(503,'storage_unavailable','Could not durably register request; no destination request was sent.');}
 try {$dispatch=QueueDispatcher::tick();} catch(Throwable $x) {error_log('Redist dispatch tick error: '.$x->getMessage());$dispatch=['released'=>false,'reason'=>'dispatcher_error'];}
-redist_reply(202,['ack'=>true,'type'=>'ACK','status'=>'queued','request_id'=>$id,'section'=>$sectionId,'protection'=>$section['protection'] ?? 'protect','priority'=>!empty($ipDecision['deferred'])?'deferred_after_next_wave':'normal','ip_rate'=>['count_last_60_seconds'=>(int)($ipDecision['count_60s'] ?? 0),'worry_threshold_per_minute'=>(int)($ipDecision['threshold'] ?? 60),'reason'=>$ipDecision['reason'] ?? 'unknown'],'dispatch'=>$dispatch,'message'=>'Request is durably queued. Admission ACK is not a served ACK; protected sections may soft-defer suspicious high-rate sources behind the next eligible wave.']);
+redist_reply(202,['ack'=>true,'type'=>'ACK','status'=>'queued','request_id'=>$id,'section'=>$sectionId,'protection'=>$section['protection'] ?? 'protect','captcha_required'=>$captchaRequired,'priority'=>!empty($ipDecision['deferred'])?'deferred_after_next_wave':'normal','ip_rate'=>['count_last_60_seconds'=>(int)($ipDecision['count_60s'] ?? 0),'worry_threshold_per_minute'=>(int)($ipDecision['threshold'] ?? 60),'reason'=>$ipDecision['reason'] ?? 'unknown'],'dispatch'=>$dispatch,'message'=>'Request is durably queued. Admission ACK is not a served ACK; protected sections may soft-defer suspicious high-rate sources behind the next eligible wave.']);
