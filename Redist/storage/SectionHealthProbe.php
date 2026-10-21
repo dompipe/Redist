@@ -57,8 +57,8 @@ final class SectionHealthProbe {
                 $ch = curl_init(rtrim($origin, '/') . '/');
                 curl_setopt_array($ch, [
                     CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_NOBODY => true,
-                    CURLOPT_CUSTOMREQUEST => 'GET',
+                    CURLOPT_HTTPGET => true,
+                    CURLOPT_MAXFILESIZE => 1024,
                     CURLOPT_CONNECTTIMEOUT => 5,
                     CURLOPT_TIMEOUT => 10,
                     CURLOPT_FOLLOWLOCATION => false,
