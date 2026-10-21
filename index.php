@@ -145,7 +145,7 @@ try {
     $db = SqliteStore::db();
     // Serialize idempotency check and insert so concurrent retries cannot
     // create a second entry or race a different payload under the same key.
-    $db->exec('BEGIN IMMEDIATE');
+    $db->beginTransaction();
     try {
         $existing = $db->prepare('SELECT payload_json,status,position FROM queue_entries WHERE entry_key=?');
         $existing->execute([$entryKey]);
