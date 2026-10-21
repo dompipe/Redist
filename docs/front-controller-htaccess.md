@@ -1,6 +1,6 @@
 # Optional .htaccess front-controller mode
 
-The root `.htaccess` defaults to `REDIST_FRONT_CONTROLLER off`. Change it to `on` to route incoming requests through `index.php`.
+The root `.htaccess` sets `REDIST_FRONT_CONTROLLER=off` early using `SetEnvIf`. Change `off` to `on` to route incoming requests through `index.php`.
 
 - The original query string is retained with `QSA`.
 - The HTTP method and request body are preserved by the internal rewrite.
