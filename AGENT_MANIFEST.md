@@ -185,7 +185,7 @@ Keep limits finite. If traffic estimates and destination capacity are unknown, u
 
 These fields are a proposed schema until the runtime validates and enforces them. They express logical coordination policy, not a demand to deploy one machine per spoke:
 
-\`\`\`json
+```json
 {
   "version": 1,
   "coordination": {
@@ -225,7 +225,7 @@ These fields are a proposed schema until the runtime validates and enforces them
     }
   }
 }
-\`\`\`
+```
 
 The numbers above are examples only, not recommended production limits. Validate that global limits are at least as restrictive as the sum of section budgets where shared workers/resources require it. The runtime must reject unknown or unsupported settings rather than silently ignoring them.
 
