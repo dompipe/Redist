@@ -7,13 +7,8 @@ require_once dirname(__DIR__) . '/storage/SqliteStore.php';
 require_once __DIR__ . '/WaveQueue.php';
 
 use Redist\storage\SqliteStore;
-use RuntimeException;
 
-/**
- * Durable timer/threshold dispatcher.
- * A queue batch is released when its size reaches REDIST_WAVE_THRESHOLD or
- * its oldest queued item reaches REDIST_QUEUE_RELEASE_SECONDS.
- */
+/** Durable threshold-or-timer queue release. Invoke tick from ingress and a cron worker. */
 final class QueueDispatcher {
     public static function tick(): array {
         $threshold = max(1, (int)(getenv('REDIST_WAVE_THRESHOLD') ?: 10));
@@ -34,14 +29,21 @@ final class QueueDispatcher {
                 return ['released'=>false,'reason'=>'previous_wave_not_complete','queued'=>count($rows),'previous_wave_status'=>$last];
             }
             $batch = array_slice($rows, 0, $threshold);
-            $ids = array_map(static fn($r) => (string)$r['entry_key'], $batch);
-            $wave = WaveQueue::begin(null, $ids);
             $u = $db->prepare("UPDATE queue_entries SET status='dispatching',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE entry_key=? AND status='queued'");
             foreach ($batch as $r) $u->execute([$r['entry_key']]);
             $db->commit();
         } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
+        }
+
+        $ids = array_map(static fn($r) => (string)$r['entry_key'], $batch);
+        try {
+            $wave = WaveQueue::begin(null, $ids);
+        } catch (\Throwable $e) {
+            $restore = $db->prepare("UPDATE queue_entries SET status='queued',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE entry_key=? AND status='dispatching'");
+            foreach ($batch as $r) $restore->execute([$r['entry_key']]);
+            return ['released'=>false,'reason'=>'wave_creation_failed','error'=>$e->getMessage(),'queued'=>count($rows)];
         }
 
         $results = [];
@@ -59,12 +61,12 @@ final class QueueDispatcher {
                 $response = curl_exec($ch); $error = curl_error($ch) ?: null; $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
                 if ($response === false && !$error) $error = 'Destination transport failed';
             }
-            $state = WaveQueue::record(null, $wave['id'], (string)$r['entry_key'], $code, $error);
+            $waveState = WaveQueue::record(null, $wave['id'], (string)$r['entry_key'], $code, $error);
             $status = $error === null && $code >= 200 && $code < 300 ? 'served' : 'failed';
             $q = $db->prepare("UPDATE queue_entries SET status=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE entry_key=?");
             $q->execute([$status, $r['entry_key']]);
             $results[] = ['request_key'=>$r['entry_key'],'status'=>$status,'http_code'=>$code ?: null,'error'=>$error];
         }
-        return ['released'=>true,'wave_id'=>$wave['id'],'status'=>$state['status'] ?? 'running','members'=>$results];
+        return ['released'=>true,'wave_id'=>$wave['id'],'status'=>$waveState['status'] ?? 'running','members'=>$results];
     }
 }
