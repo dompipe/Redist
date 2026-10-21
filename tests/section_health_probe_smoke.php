@@ -18,13 +18,14 @@ putenv('REDIST_SQLITE_PATH=' . $dbPath);
 try {
     SqliteStore::db();
     $manifest = ['version'=>1,'sections'=>['unused'=>['target_origin'=>'not-a-valid-origin']]];
-    $first = SectionHealthProbe::run($manifest, 1790000000);
+    $probeNow = time();
+    $first = SectionHealthProbe::run($manifest, $probeNow);
     probeCheck(($first['checked'] ?? 0) === 1, 'unknown section gets an active health probe');
     $state = SectionHealth::status('unused')['state'];
     probeCheck($state === 'suspected_down', 'failed probe is recorded as a failed observation, not healthy');
-    $early = SectionHealthProbe::run($manifest, 1790000000 + 299);
+    $early = SectionHealthProbe::run($manifest, $probeNow + 299);
     probeCheck(($early['checked'] ?? -1) === 0, 'probe is not repeated before five minutes');
-    $later = SectionHealthProbe::run($manifest, 1790000000 + 300);
+    $later = SectionHealthProbe::run($manifest, $probeNow + 300);
     probeCheck(($later['checked'] ?? 0) === 1, 'unknown/unhealthy section is rechecked at five minutes');
 } finally {
     foreach ([$dbPath, $dbPath . '-wal', $dbPath . '-shm'] as $file) if (is_file($file)) @unlink($file);
