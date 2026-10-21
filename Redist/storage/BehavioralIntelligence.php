@@ -140,7 +140,7 @@ final class BehavioralIntelligence {
             click_count INTEGER NOT NULL DEFAULT 0,
             recent_clicks TEXT NOT NULL DEFAULT '[]',
             view_state TEXT NOT NULL DEFAULT 'observe',
-            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         )");
         $db->exec('CREATE INDEX IF NOT EXISTS idx_behavior_click_active ON behavior_click_traces(view_state,last_event_at)');
         $db->beginTransaction();
@@ -207,7 +207,7 @@ final class BehavioralIntelligence {
             first_slot INTEGER NOT NULL, last_slot INTEGER NOT NULL, bitstream TEXT NOT NULL,
             click_count INTEGER NOT NULL DEFAULT 0, recent_clicks TEXT NOT NULL DEFAULT '[]',
             view_state TEXT NOT NULL DEFAULT 'observe',
-            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         )");
         $q=$db->prepare("UPDATE behavior_click_traces SET ended_at=last_event_at,view_state='ended',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ended_at IS NULL AND last_event_at < ?");
         $q->execute([time()-$idleSeconds]); return $q->rowCount();
@@ -222,7 +222,7 @@ final class BehavioralIntelligence {
             first_slot INTEGER NOT NULL, last_slot INTEGER NOT NULL, bitstream TEXT NOT NULL,
             click_count INTEGER NOT NULL DEFAULT 0, recent_clicks TEXT NOT NULL DEFAULT '[]',
             view_state TEXT NOT NULL DEFAULT 'observe',
-            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         )");
         $q=$db->prepare('SELECT id,section_id,substr(actor_key,1,12) AS actor_ref,started_at,last_event_at,ended_at,bitstream,click_count,view_state FROM behavior_click_traces ORDER BY last_event_at DESC LIMIT '.$limit);
         $q->execute(); return $q->fetchAll(PDO::FETCH_ASSOC);
