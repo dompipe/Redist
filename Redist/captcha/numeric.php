@@ -58,7 +58,7 @@ function redistCaptchaImage(int $frame): never {
     }
     redistCaptchaEnsure();
     $state = $_SESSION['redist_numeric_captcha'];
-    if ((int)$state['expires'] < time() || !empty($state['passed'])) {
+    if ((int)$state['expires'] < time()) {
         redistCaptchaFreshRound();
         $state = $_SESSION['redist_numeric_captcha'];
     }
