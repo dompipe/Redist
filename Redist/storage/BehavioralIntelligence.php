@@ -101,9 +101,9 @@ final class BehavioralIntelligence {
         $eventTimes = [];
         foreach (array_reverse($rows) as $eventRow) {
             try {
-                $dt = new \\DateTimeImmutable((string)$eventRow['observed_at']);
+                $dt = new \DateTimeImmutable((string)$eventRow['observed_at']);
                 $eventTimes[] = (float)$dt->format('U.u');
-            } catch (\\Throwable $ignored) {
+            } catch (\Throwable $ignored) {
                 // Ignore malformed timestamps rather than manufacturing a signal.
             }
         }
