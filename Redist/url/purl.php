@@ -143,7 +143,7 @@ class pURL implements pUser {
 		);
 		array_shift(self::$users);
 		
-		file_put_contents(self::$setup->path_server . "/users.conf", json_encode(self::$users));
+		\\Redist\\storage\\SqliteStore::replaceQueue(self::$users);
 		$context = stream_context_create($options);
 		$url = self::opt_ssl . self::$user->cookie_sheet->server;
 		self::$page_contents = file_get_contents($url, false, $context);
@@ -153,7 +153,7 @@ class pURL implements pUser {
 	public static function update_queue() {
 		
 		self::$files->save_user_log(self::$request['session'][$_SERVER['HTTP_REFERER']]);
-		file_put_contents(self::$setup->path_server . "/users.conf", json_encode(self::$users));
+		\\Redist\\storage\\SqliteStore::replaceQueue(self::$users);
 	}
 
 	public static function disassemble_IP($host) {
@@ -333,7 +333,7 @@ class pURL implements pUser {
 		$x = [];
 		if (sizeof(self::$users) > 2000) {
 			if (self::relative_count() > 50) {
-				self::$files->save_user_log($_SERVER['REMOTE_ADDR']);
+				self::$files->save_user_log(self::$hash, self::$request);
 				array_unique(self::$users);
 				file_put_contents(self::$setup->path_server . "/users.conf", json_encode(self::$users));
 				exit();
@@ -359,7 +359,7 @@ class pURL implements pUser {
 		
 		if (sizeof(self::$users) > 0) {
 			self::run_queue();
-			self::$files->save_user_log($_SERVER['REMOTE_ADDR']);
+			self::$files->save_user_log(self::$hash, self::$request);
 			self::update_queue();
 		}
 		else if (isset(self::$request['session'][$_SERVER['HTTP_REFERER']])) {
