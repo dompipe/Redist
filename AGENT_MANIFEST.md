@@ -487,3 +487,29 @@ Use `Redist\files\AtomicFile::writeOnce($destination, $contents, $logger, $mode)
 The result includes `ok`, `code`, `path`, `bytes`, and a safe diagnostic `message`. An optional logger callback receives `(level, event, context)`; file contents are never included. Logger failures are caught and do not change the write result. The default mode is `0600`; callers may request a narrower permission mode such as `0640` when another trusted process needs read access.
 
 The destination directory must already exist, be writable by the caller, be trusted against untrusted directory writers, and support hard links. The helper does not create directories, does not overwrite, and reports errors instead of silently falling back to a less-safe operation. This is an overwrite guard, not a substitute for directory ownership/permissions, signature verification, or safe path selection. The CI smoke test is `tests/atomic_file_smoke.php`.
+
+
+## Isolated staging vault ("threshing floor")
+
+The staging vault is a separate runtime directory, not a directory committed to or served from the application checkout. Prepare it with `bin/prepare-vault.sh` from a trusted deployment shell:
+
+```sh
+REDIST_VAULT_ROOT=/home/ACCOUNT/private/redist-vault bash bin/prepare-vault.sh
+```
+
+Replace the example path with an absolute path that is outside both the application checkout and the web document root. The script refuses a path inside the checkout, creates the layout, and applies conservative directory modes. It deliberately does not change owner/group or pretend that Unix mode bits alone create separate identities.
+
+Layout:
+
+- `incoming/`: private intake area; mode `0700`, never web-served.
+- `verified/`: validated artifacts; publisher-owned directory, readable by an explicitly authorized reader group.
+- `published/`: immutable/approved artifacts; request handlers receive read/traverse access only.
+- `quarantine/`: rejected or expired artifacts; mode `0700`, not served.
+- `index/`: minimal generation/pointer metadata; only the publisher writes it.
+- `logs/`: operational diagnostics, with no private keys, plaintext token values, or artifact contents.
+
+The expected flow is source/GPG output -> `incoming/` -> signature and policy verification -> `verified/` -> controlled publication to `published/`. Rejected files go to `quarantine/`. Always copy or generate into staging; never change canonical source files in place. Keep private signing keys outside the vault and outside the web root. GPG verification keys/keyrings should be controlled separately from writable intake.
+
+**Important privilege boundary:** run the setup as a dedicated vault/publisher account. Add the PHP request account only to a read-only group for the specific files/directories it needs. It must not own the vault or have write permission on the vault root, parent directories, `incoming/`, `verified/`, `published/`, or `index/`. The publisher must be the only writer; the request handler should not be able to replace a read-only file by renaming a new file over it. If PHP and the publisher run under the same Unix account, the directory layout is organizational isolation, not a strong security boundary.
+
+The script only prepares directories and modes. Ownership, group membership/ACLs, GPG configuration, publication policy, and token validation remain explicit deployment/application steps. It does not claim to implement link-token lifecycle or to validate/publish files automatically.
