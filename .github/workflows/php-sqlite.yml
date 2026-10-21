@@ -17,6 +17,7 @@ jobs:
       - name: Lint changed PHP files
         run: |
           php -l Redist/storage/SqliteStore.php
+          php -l Redist/storage/SectionHealth.php
           php -l Redist/storage/migrate.php
           php -l Redist/curl/WaveQueue.php
           php -l Redist/curl/curl.php
@@ -25,3 +26,4 @@ jobs:
           php -l dashboard.php
       - name: SQLite wave and queue smoke test
         run: php tests/sqlite_smoke.php
+          php tests/section_health_smoke.php
