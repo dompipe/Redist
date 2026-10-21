@@ -299,7 +299,7 @@ class pURL implements pUser {
 						exit;
 					}
 				}
-			} catch (\\Throwable $e) {
+			} catch (\Throwable $e) {
 				error_log('Redist IP guard error: ' . $e->getMessage());
 				http_response_code(503);
 				exit("Redist admission guard temporarily unavailable.\n");
