@@ -20,6 +20,7 @@ jobs:
           php -l Redist/storage/SectionHealth.php
           php -l Redist/storage/IpRangeGuard.php
           php -l Redist/storage/BehavioralIntelligence.php
+          php -l tests/timing_pattern_smoke.php
           php -l Redist/storage/migrate.php
           php -l Redist/curl/WaveQueue.php
           php -l Redist/curl/curl.php
