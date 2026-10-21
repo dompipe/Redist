@@ -16,6 +16,7 @@ jobs:
           coverage: none
       - name: Lint PHP files
         run: |
+          bash -n bin/prepare-vault.sh
           php -l Redist/storage/SqliteStore.php
           php -l Redist/storage/SectionHealth.php
           php -l Redist/storage/IpRangeGuard.php
