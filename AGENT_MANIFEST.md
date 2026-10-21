@@ -543,3 +543,33 @@ This is a PHP-GD, session-backed numeric challenge page intended as a progressiv
 7. **Operational validation:** verify all protected entry paths pass through the policy gate; test session isolation, expiry, repeated wrong answers, round completion, and behavior under concurrent requests. Use edge/WAF rate limiting as well, because a PHP CAPTCHA cannot protect the PHP worker pool from traffic that never reaches the gate.
 
 Do not describe numeric CAPTCHA as a strong standalone bot defense. Motion and color changes may frustrate simplistic OCR, but are not reliable against modern vision models. Treat it as one friction layer combined with bounded admission, wave backpressure, rate limiting, and monitoring.
+
+
+## Per-section protection policy
+
+Every section in `redist.manifest.json` may set a `protection` string:
+
+- `"protect"`: enables the section's adaptive IP-rate reputation and soft deferral policy. This is the default when the key is omitted, for backwards compatibility.
+- `"no-protect"`: opts that section out of adaptive IP-rate observation/soft deferral. It does **not** disable global ingress validation, body-size limits, method checks, idempotency, manifest destination allowlisting, or wave dispatch controls.
+
+Example:
+
+```json
+{
+  "version": 1,
+  "sections": {
+    "public": {
+      "target_origin": "https://www.example.com",
+      "protection": "protect"
+    },
+    "static-demo": {
+      "target_origin": "https://demo.example.com",
+      "protection": "no-protect"
+    }
+  }
+}
+```
+
+Use only the exact values `protect` and `no-protect`; other values are a manifest configuration error and ingress rejects the section with HTTP 503. The ingress response reports the selected `protection` mode. Keep protection enabled unless the section owner has deliberately accepted the trade-off.
+
+**Integration note:** this key currently governs the ingress `IpReputation` rate/deferral behavior in `index.php`. It does not yet exempt a section from or route it through the separate legacy `pURL::spoof_check()` / Cloudflare Turnstile challenge flow, nor is the new numeric CAPTCHA wired into that legacy gate. Before treating the manifest value as the sole policy authority, make all protected entry paths consult the same section policy and bind CAPTCHA passes to the correct session/scope.
