@@ -113,7 +113,7 @@ if ($captchaRequired) {
         && is_string($captchaState['passed_scope'])
         && hash_equals($captchaScope, $captchaState['passed_scope']);
     if (!$captchaPassed) {
-        $challengeUrl = 'Redist/captcha/numeric.php?mode=page&section='
+        $challengeUrl = '/Redist/captcha/numeric.php?mode=page&section='
             . rawurlencode($sectionId) . '&path=' . rawurlencode($path);
         redist_reply(403, [
             'ack' => false,
