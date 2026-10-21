@@ -141,12 +141,11 @@ final class BehavioralIntelligence {
             recent_clicks TEXT NOT NULL DEFAULT '[]',
             view_state TEXT NOT NULL DEFAULT 'observe',
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-            UNIQUE(section_id, actor_key)
         )");
         $db->exec('CREATE INDEX IF NOT EXISTS idx_behavior_click_active ON behavior_click_traces(view_state,last_event_at)');
         $db->beginTransaction();
         try {
-            $q = $db->prepare('SELECT * FROM behavior_click_traces WHERE section_id=? AND actor_key=?');
+            $q = $db->prepare('SELECT * FROM behavior_click_traces WHERE section_id=? AND actor_key=? AND ended_at IS NULL ORDER BY id DESC LIMIT 1');
             $q->execute([$section,$actor]); $row = $q->fetch(PDO::FETCH_ASSOC);
             if (!$row) {
                 $ins = $db->prepare("INSERT INTO behavior_click_traces(section_id,actor_key,started_at,last_event_at,first_slot,last_slot,bitstream,click_count,recent_clicks) VALUES(?,?,?,?,?,?,?,1,?)");
@@ -185,7 +184,7 @@ final class BehavioralIntelligence {
             // Newly created/restarted rows also need the current threshold state.
             $recent = $recent ?? [$now];
             $state = count($recent) >= $limit ? 'review' : 'observe';
-            $db->prepare("UPDATE behavior_click_traces SET view_state=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE section_id=? AND actor_key=?")->execute([$state,$section,$actor]);
+            $db->prepare("UPDATE behavior_click_traces SET view_state=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=(SELECT id FROM behavior_click_traces WHERE section_id=? AND actor_key=? AND ended_at IS NULL ORDER BY id DESC LIMIT 1)")->execute([$state,$section,$actor]);
             $db->commit();
             return ['section_id'=>$section,'started_at'=>$start,'last_event_at'=>$now,
                 'slot_seconds'=>4,'bitstream'=>$bits,'clicks_in_last_12_seconds'=>count($recent),
@@ -209,7 +208,6 @@ final class BehavioralIntelligence {
             click_count INTEGER NOT NULL DEFAULT 0, recent_clicks TEXT NOT NULL DEFAULT '[]',
             view_state TEXT NOT NULL DEFAULT 'observe',
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-            UNIQUE(section_id, actor_key)
         )");
         $q=$db->prepare("UPDATE behavior_click_traces SET ended_at=last_event_at,view_state='ended',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ended_at IS NULL AND last_event_at < ?");
         $q->execute([time()-$idleSeconds]); return $q->rowCount();
@@ -225,7 +223,6 @@ final class BehavioralIntelligence {
             click_count INTEGER NOT NULL DEFAULT 0, recent_clicks TEXT NOT NULL DEFAULT '[]',
             view_state TEXT NOT NULL DEFAULT 'observe',
             updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-            UNIQUE(section_id, actor_key)
         )");
         $q=$db->prepare('SELECT id,section_id,substr(actor_key,1,12) AS actor_ref,started_at,last_event_at,ended_at,bitstream,click_count,view_state FROM behavior_click_traces ORDER BY last_event_at DESC LIMIT '.$limit);
         $q->execute(); return $q->fetchAll(PDO::FETCH_ASSOC);
