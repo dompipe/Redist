@@ -1,16 +1,16 @@
 <?php
-namespace Redist\\files;
+namespace Redist\files;
 
 require_once __DIR__ . '/../storage/SqliteStore.php';
 require_once __DIR__ . '/files.php';
 
-use Redist\\storage\\SqliteStore;
+use Redist\storage\SqliteStore;
 
 class filemngr implements files {
     static $setup;
 
     function __construct() {
-        self::$setup = new \\Redist\\setup\\pConfig();
+        self::$setup = new \Redist\setup\pConfig();
     }
 
     public static function user_log_dir() { return dirname(__DIR__, 2) . '/user_logs/'; }
@@ -22,7 +22,7 @@ class filemngr implements files {
     }
 
     public static function update_user() {
-        $payload = isset(\\Redist\\url\\pURL::$request) ? \\Redist\\url\\pURL::$request : [];
+        $payload = isset(\Redist\url\pURL::$request) ? \Redist\url\pURL::$request : [];
         return SqliteStore::saveUserLog(self::currentKey(), $payload);
     }
 
@@ -32,7 +32,7 @@ class filemngr implements files {
 
     public static function save_user_log($key = null, $payload = null) {
         if (is_array($key) && $payload === null) { $payload = $key; $key = null; }
-        if ($payload === null) $payload = isset(\\Redist\\url\\pURL::$request) ? \\Redist\\url\\pURL::$request : [];
+        if ($payload === null) $payload = isset(\Redist\url\pURL::$request) ? \Redist\url\pURL::$request : [];
         return SqliteStore::saveUserLog($key ?: self::currentKey(), $payload);
     }
 
@@ -65,6 +65,6 @@ class filemngr implements files {
     }
 
     public static function set_content_type($type) {
-        return \\Redist\\curl\\curl::set_content_type($type);
+        return \Redist\curl\curl::set_content_type($type);
     }
 }
