@@ -16,19 +16,28 @@ final class QueueDispatcher {
         $db = SqliteStore::db();
         $db->beginTransaction();
         try {
-            $rows = $db->query("SELECT id,entry_key,payload_json,created_at FROM queue_entries WHERE status='queued' ORDER BY position,id")->fetchAll();
+            $rows = $db->query("SELECT id,entry_key,payload_json,created_at,priority,defer_until_wave FROM queue_entries WHERE status='queued' ORDER BY position,id")->fetchAll();
             if (!$rows) { $db->commit(); return ['released'=>false,'reason'=>'empty','queued'=>0]; }
-            $age = max(0, time() - (strtotime((string)$rows[0]['created_at']) ?: time()));
-            if (count($rows) < $threshold && $age < $delay) {
+            $lastWave = $db->query("SELECT id,status FROM waves ORDER BY id DESC LIMIT 1")->fetch();
+            if ($lastWave && $lastWave['status'] !== 'complete') {
                 $db->commit();
-                return ['released'=>false,'reason'=>'waiting_for_threshold_or_timer','queued'=>count($rows),'oldest_age_seconds'=>$age,'threshold'=>$threshold,'release_seconds'=>$delay];
+                return ['released'=>false,'reason'=>'previous_wave_not_complete','queued'=>count($rows),'previous_wave_status'=>$lastWave['status']];
             }
-            $last = $db->query("SELECT status FROM waves ORDER BY id DESC LIMIT 1")->fetchColumn();
-            if ($last !== false && $last !== 'complete') {
+            $completedWaveId = (int)$db->query("SELECT COALESCE(MAX(id),0) FROM waves WHERE status='complete'")->fetchColumn();
+            $eligible = array_values(array_filter($rows, static fn($r) => (int)($r['defer_until_wave'] ?? 0) === 0 || (int)$r['defer_until_wave'] <= $completedWaveId));
+            // A deferred-only queue must not deadlock forever. It can use the
+            // timer fallback if no ordinary request arrives to form the next wave.
+            $usingDeferredFallback = false;
+            if (!$eligible) {
+                $eligible = $rows;
+                $usingDeferredFallback = true;
+            }
+            $age = max(0, time() - (strtotime((string)$eligible[0]['created_at']) ?: time()));
+            if (count($eligible) < $threshold && $age < $delay) {
                 $db->commit();
-                return ['released'=>false,'reason'=>'previous_wave_not_complete','queued'=>count($rows),'previous_wave_status'=>$last];
+                return ['released'=>false,'reason'=>'waiting_for_threshold_or_timer','queued'=>count($rows),'eligible'=>count($eligible),'deferred'=>count($rows)-count($eligible),'oldest_age_seconds'=>$age,'threshold'=>$threshold,'release_seconds'=>$delay];
             }
-            $batch = array_slice($rows, 0, $threshold);
+            $batch = array_slice($eligible, 0, $threshold);
             $u = $db->prepare("UPDATE queue_entries SET status='dispatching',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE entry_key=? AND status='queued'");
             foreach ($batch as $r) $u->execute([$r['entry_key']]);
             $db->commit();
@@ -67,6 +76,6 @@ final class QueueDispatcher {
             $q->execute([$status, $r['entry_key']]);
             $results[] = ['request_key'=>$r['entry_key'],'status'=>$status,'http_code'=>$code ?: null,'error'=>$error];
         }
-        return ['released'=>true,'wave_id'=>$wave['id'],'status'=>$waveState['status'] ?? 'running','members'=>$results];
+        return ['released'=>true,'wave_id'=>$wave['id'],'status'=>$waveState['status'] ?? 'running','members'=>$results,'deferred_fallback'=>$usingDeferredFallback];
     }
 }
