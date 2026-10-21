@@ -253,24 +253,56 @@ class pURL implements pUser {
 
 	// ***
 	public static function spoof_check() {
-		// Persist the source IP and its IPv4 A.B.C /24 range before admission.
-		// Use REMOTE_ADDR only; forwarded headers are not trusted by default.
 		$sourceIp = (string)($_SERVER['REMOTE_ADDR'] ?? '');
 		if (filter_var($sourceIp, FILTER_VALIDATE_IP)) {
 			require_once dirname(__DIR__) . '/storage/IpRangeGuard.php';
 			try {
-				\\Redist\\storage\\IpRangeGuard::observe($sourceIp);
-				$blocked = \\Redist\\storage\\IpRangeGuard::isBlocked($sourceIp);
+				$observation = \Redist\storage\IpRangeGuard::observe($sourceIp);
+				$blocked = \Redist\storage\IpRangeGuard::isBlocked($sourceIp);
 				if ($blocked) {
 					http_response_code(403);
 					header('Content-Type: text/plain; charset=utf-8');
-					exit("Access denied by Redist IP blacklist.\\n");
+					exit("Access denied by Redist IP blacklist.\n");
+				}
+				$challenge = \Redist\storage\IpRangeGuard::challengeFor($sourceIp);
+				if ($challenge) {
+					$siteKey = (string)(getenv('REDIST_TURNSTILE_SITE_KEY') ?: '');
+					$secret = (string)(getenv('REDIST_TURNSTILE_SECRET_KEY') ?: '');
+					if ($siteKey === '' || $secret === '') {
+						http_response_code(503);
+						header('Content-Type: text/plain; charset=utf-8');
+						exit("Redist has flagged this IP range for a CAPTCHA challenge, but the site administrator has not configured CAPTCHA keys.\n");
+					}
+					if (session_status() !== PHP_SESSION_ACTIVE) @session_start();
+					$passKey = 'redist_captcha_pass_' . hash('sha256', $challenge['range_cidr'] . '|' . $sourceIp);
+					if (empty($_SESSION[$passKey]) || (int)$_SESSION[$passKey] < time()) {
+						$error = '';
+						if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['cf-turnstile-response'])) {
+							$token = (string)$_POST['cf-turnstile-response'];
+							$payload = http_build_query(['secret'=>$secret,'response'=>$token,'remoteip'=>$sourceIp]);
+							$ctx = stream_context_create(['http'=>['method'=>'POST','header'=>"Content-Type: application/x-www-form-urlencoded\r\n",'content'=>$payload,'timeout'=>5,'ignore_errors'=>true]]);
+							$raw = @file_get_contents('https://challenges.cloudflare.com/turnstile/v0/siteverify', false, $ctx);
+							$verification = is_string($raw) ? json_decode($raw, true) : null;
+							if (is_array($verification) && !empty($verification['success'])) {
+								$_SESSION[$passKey] = time() + 1800;
+								session_write_close();
+								header('Location: ' . (string)($_SERVER['REQUEST_URI'] ?? '/'), true, 303);
+								exit;
+							}
+							$error = 'CAPTCHA verification failed. Please try again.';
+						}
+						http_response_code(429);
+						header('Content-Type: text/html; charset=utf-8');
+						$escapedKey = htmlspecialchars($siteKey, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+						$escapedError = htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+						echo '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verify request</title><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><body style="font:16px system-ui;max-width:520px;margin:12vh auto;padding:24px;color:#182230"><h1>One quick security check</h1><p>Requests from your network are arriving unusually quickly. Complete this check to continue.</p><p role="alert">' . $escapedError . '</p><form method="post"><div class="cf-turnstile" data-sitekey="' . $escapedKey . '"></div><p><button type="submit">Verify and continue</button></p></form></body></html>';
+						exit;
+					}
 				}
 			} catch (\\Throwable $e) {
-				// Do not silently fail open if the blacklist cannot be checked.
 				error_log('Redist IP guard error: ' . $e->getMessage());
 				http_response_code(503);
-				exit("Redist admission guard temporarily unavailable.\\n");
+				exit("Redist admission guard temporarily unavailable.\n");
 			}
 		}
 		if (file_exists("spoof_list"))
