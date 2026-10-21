@@ -146,7 +146,7 @@ if ($db !== null) {
             }
         }
         if (in_array('section_downtime', $tables, true)) {
-            $downtimeRows = $db->query("SELECT * FROM section_downtime ORDER BY id DESC LIMIT 20")->fetchAll();
+            $downtimeRows = $db->query("SELECT * FROM section_downtime ORDER BY id DESC LIMIT " . max(10, min(1000, (int)$sectionSettings['history_limit']))->fetchAll();
         }
     } catch (Throwable $e) { /* Health panel remains empty if the recorder schema is unavailable. */ }
 }
@@ -219,7 +219,7 @@ main{max-width:1240px;margin:auto;padding:26px 18px 48px}.top{display:flex;align
     <div style="align-self:end"><button type="submit" style="padding:10px 16px;cursor:pointer">Save settings</button></div>
   </form>
   <?php endif; ?>
-  <p class="foot">The stale window and history limit are stored for the dashboard/recorder follow-up; stale-state enforcement and retention cleanup still need implementation.</p>
+  <p class="foot">The stale window controls whether old observations display as unknown. The history limit controls how many incident rows are shown; automatic deletion/retention cleanup is not enabled.</p>
 </section>
 <section class="panel" style="margin:20px 0;padding:18px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;color:#172033">
   <h2 style="margin:0 0 8px">Section availability</h2>
