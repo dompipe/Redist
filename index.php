@@ -143,26 +143,39 @@ $entryKey = 'api:' . hash('sha256', $requestId);
 
 try {
     $db = SqliteStore::db();
-    $existing = $db->prepare('SELECT payload_json,status,position FROM queue_entries WHERE entry_key=?');
-    $existing->execute([$entryKey]);
-    $prior = $existing->fetch();
-    if ($prior) {
-        $priorEntry = json_decode((string)$prior['payload_json'], true);
-        if (!is_array($priorEntry) || !hash_equals(
-            hash('sha256', json_encode($priorEntry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)),
-            hash('sha256', $entryJson)
-        )) {
-            redist_nack(409, 'idempotency_conflict', 'This request_id was already used for a different envelope.');
+    // Serialize idempotency check and insert so concurrent retries cannot
+    // create a second entry or race a different payload under the same key.
+    $db->exec('BEGIN IMMEDIATE');
+    try {
+        $existing = $db->prepare('SELECT payload_json,status,position FROM queue_entries WHERE entry_key=?');
+        $existing->execute([$entryKey]);
+        $prior = $existing->fetch();
+        if ($prior) {
+            $priorEntry = json_decode((string)$prior['payload_json'], true);
+            $priorJson = is_array($priorEntry)
+                ? json_encode($priorEntry, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
+                : '';
+            if (!hash_equals(hash('sha256', $priorJson), hash('sha256', $entryJson))) {
+                $db->rollBack();
+                redist_nack(409, 'idempotency_conflict', 'This request_id was already used for a different envelope.');
+            }
+            $db->commit();
+            redist_reply(202, [
+                'ack' => true, 'type' => 'ACK', 'status' => 'accepted',
+                'duplicate' => true, 'request_id' => $requestId,
+                'queue_status' => (string)$prior['status'],
+                'message' => 'This request ID was already admitted; no second queue entry was created.'
+            ]);
         }
-        redist_reply(202, [
-            'ack' => true, 'type' => 'ACK', 'status' => 'accepted',
-            'duplicate' => true, 'request_id' => $requestId,
-            'queue_status' => (string)$prior['status'],
-            'message' => 'This request ID was already admitted; no second queue entry was created.'
-        ]);
-    }
 
-    SqliteStore::enqueue($entry, $entryKey);
+        $position = (int)$db->query("SELECT COALESCE(MAX(position),-1)+1 FROM queue_entries WHERE status='queued'")->fetchColumn();
+        $insert = $db->prepare("INSERT INTO queue_entries(entry_key,position,payload_json,status) VALUES(?,?,?,'queued')");
+        $insert->execute([$entryKey, $position, $entryJson]);
+        $db->commit();
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
     redist_reply(202, [
         'ack' => true, 'type' => 'ACK', 'status' => 'accepted',
         'duplicate' => false, 'request_id' => $requestId,
