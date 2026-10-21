@@ -298,6 +298,14 @@ The design target is **one active wave per section**, not one global wave for th
 
 These rules describe the intended design. The AI must inspect the current Redist implementation and clearly call out any rule that the runtime does not yet enforce.
 
+## Runtime dispatch contract (implemented by root index.php)
+
+The root POST endpoint requires `redist.manifest.json` beside `index.php`, with `version: 1` and a `sections` object. Every dispatchable section must declare an explicit `target_origin`, such as `https://origin.example.com`. This origin must be owner-controlled and reachable by the Redist host. The endpoint accepts a relative same-origin `payload.path` and optional `payload.query`; it constructs the destination URL from the manifest origin, never from a caller-supplied absolute URL. This prevents the POST body from turning the ingress into an arbitrary-URL/SSRF proxy.
+
+The endpoint records an idempotency row before network I/O. A successful destination HTTP 2xx response is the only condition that returns `200 ACK status=served`. A destination transport error or non-2xx returns `502 NACK status=failed`; manifest or storage failures return a NACK without claiming delivery. A retry using the same request ID never intentionally dispatches a second time: served requests replay the served ACK, in-progress requests return a conflict, and failed requests require explicit reconciliation before an intentional retry with a new ID. A network timeout can leave the remote outcome ambiguous, so the local failure response must not be interpreted as proof that the destination did no work.
+
+This synchronous ingress is not the multi-member section-wave coordinator. It proves a single destination response, not that all requests in a section wave have completed. Do not represent it as wave-level completion until requests are enrolled in `WaveQueue` and the wave's persisted member states are checked.
+
 ## Manifest format
 
 Use JSON for the generated `redist.manifest.json`. Keep the schema conservative and versioned. A proposed shape is:
