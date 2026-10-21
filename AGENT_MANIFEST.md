@@ -138,6 +138,22 @@ The generated manifest must use deterministic, non-overlapping routing:
 7. Preserve query strings for the request itself, but do not use query parameters to define section boundaries unless the owner specifically requires it.
 8. Do not treat the HTTP `Referer` as authoritative routing identity. Route using the request's validated host and path.
 
+## IP-range reputation and targeted CAPTCHA challenges
+
+Redist also tracks source IPs and groups IPv4 addresses into their A.B.C.0/24 range. This is separate from section availability and wave completion.
+
+Current implementation notes for `Redist/storage/IpRangeGuard.php` and `Redist/url/purl.php`:
+
+- Observations are recorded in SQLite for requests that pass through Redist's `pURL::spoof_check()`; this is not a host-wide firewall and does not observe requests that bypass Redist.
+- The default trigger is 120 observed requests from one IPv4 /24 in a rolling one-minute window. Configure with `REDIST_RANGE_CHALLENGE_THRESHOLD`; challenge expiry defaults to 600 seconds and is configurable with `REDIST_RANGE_CHALLENGE_TTL_SECONDS`.
+- A triggered range receives a Cloudflare Turnstile challenge. Configure `REDIST_TURNSTILE_SITE_KEY` and `REDIST_TURNSTILE_SECRET_KEY` in the server environment. Tokens are verified server-side against Turnstile's Siteverify endpoint.
+- A successful challenge grants that IP/browser session a 30-minute pass; it does not clear the challenge for every address in the /24.
+- Existing individual-IP and /24 blacklist entries are checked before CAPTCHA challenge state. Blocking a range can affect legitimate users behind shared NAT and should remain a deliberate escalation.
+- If a range is flagged but CAPTCHA keys are missing, Redist returns a 503 rather than silently allowing the request through. Configure keys before enabling this behavior in production.
+- Challenge status and range counts are displayed in the operations dashboard.
+
+These are runtime behaviors only for the Redist entry point that invokes `spoof_check()`. Deployments should confirm all relevant inbound paths use that entry point, test the CAPTCHA provider configuration, and consider a trusted edge/WAF rate limiter for traffic that can overwhelm PHP before this code runs.
+
 ## Spoke-based coordination for high traffic
 
 The manifest should describe a **coordinator with independent section spokes**. A spoke is a logical dispatch lane owned by one section (or explicitly configured subsection), not a page and not necessarily a separate server. The coordinator resolves a request to one section/spoke, admits it once, and tracks wave state; spokes process bounded work independently so a busy shop or API does not stall the public site.
