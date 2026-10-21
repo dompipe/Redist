@@ -513,3 +513,33 @@ The expected flow is source/GPG output -> `incoming/` -> signature and policy ve
 **Important privilege boundary:** run the setup as a dedicated vault/publisher account. Add the PHP request account only to a read-only group for the specific files/directories it needs. It must not own the vault or have write permission on the vault root, parent directories, `incoming/`, `verified/`, `published/`, or `index/`. The publisher must be the only writer; the request handler should not be able to replace a read-only file by renaming a new file over it. If PHP and the publisher run under the same Unix account, the directory layout is organizational isolation, not a strong security boundary.
 
 The script only prepares directories and modes. Ownership, group membership/ACLs, GPG configuration, publication policy, and token validation remain explicit deployment/application steps. It does not claim to implement link-token lifecycle or to validate/publish files automatically.
+
+
+## Animated numeric CAPTCHA discipline page
+
+Implementation: `Redist/captcha/numeric.php`.
+
+This is a PHP-GD, session-backed numeric challenge page intended as a progressive-discipline step before queue deferral or stronger restriction. It is not a replacement for the existing IPv4-range Turnstile gate until the administrator explicitly wires the policy gate to it.
+
+### Current behavior
+
+- `?mode=page` serves the keypad page; `?mode=frame&frame=0..7` renders a PNG frame with PHP GD.
+- The page cycles through eight actual server-rendered frames in an iframe. It uses eight adjacent digit positions with a literal pipe (`|`) between digits.
+- Each digit alternates red/black independently between frames; small position shifts, noise, and shimmer create a restrained mirage effect. The four-digit answer stays unchanged throughout the animation.
+- The generated alphabet is `02345689`; digits `1` and `7` are excluded to avoid visual ambiguity.
+- The numeric keypad is operable by click and the input remains usable with a physical keyboard. Clear resets the current input.
+- Answer, nonce, expiry, attempt count, round count, and pass state live in the PHP session; the expected answer is never emitted into the HTML or JavaScript.
+- Defaults to three sequential rounds, configurable with `REDIST_NUMERIC_CAPTCHA_ROUNDS` (bounded to 1–10). Each round has a five-minute expiry; wrong attempts are bounded. Successful completion sets `$_SESSION['redist_numeric_captcha']['passed']` for the policy layer to verify.
+- The endpoint sends no-cache headers and requires PHP GD. If GD is unavailable it returns HTTP 503 rather than pretending the challenge rendered.
+
+### Rollout plan (not yet fully integrated)
+
+1. **Configure and test:** ensure PHP GD is installed/enabled; deploy the endpoint over HTTPS; set `REDIST_NUMERIC_CAPTCHA_ROUNDS=3` if the default is not desired.
+2. **Wire the discipline gate:** update the `IpRangeGuard`/ `pURL::spoof_check()` challenge branch to send flagged sessions to this page and verify the session's pass flag before allowing the protected request to proceed. Keep existing blacklist checks ahead of the challenge.
+3. **Bind pass to policy scope:** store a short-lived pass keyed to the session and source identity, with expiry; do not treat a bare URL parameter or client-submitted flag as proof. Avoid granting a whole IPv4 /24 a pass when only one browser completed the challenge.
+4. **Enforce progressive discipline:** normal -> warning -> numeric challenge -> wave deferral/cooldown -> scoped block only for persistent or severe cases. Log reason, stage, timestamp, and outcome without recording challenge answers.
+5. **Harden the endpoint:** add CSRF protection to the challenge form, a per-session/IP attempt window, and automated smoke tests before enabling it in production. Configure proxy trust explicitly if deployment sits behind a reverse proxy; never trust arbitrary `X-Forwarded-For`.
+6. **Accessibility and resilience:** provide a non-visual/accessibility alternative and a way to request a fresh challenge; avoid overly fast animation. If GD or session storage fails, show a controlled error and do not silently mark the challenge passed.
+7. **Operational validation:** verify all protected entry paths pass through the policy gate; test session isolation, expiry, repeated wrong answers, round completion, and behavior under concurrent requests. Use edge/WAF rate limiting as well, because a PHP CAPTCHA cannot protect the PHP worker pool from traffic that never reaches the gate.
+
+Do not describe numeric CAPTCHA as a strong standalone bot defense. Motion and color changes may frustrate simplistic OCR, but are not reliable against modern vision models. Treat it as one friction layer combined with bounded admission, wave backpressure, rate limiting, and monitoring.
