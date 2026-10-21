@@ -418,3 +418,39 @@ Entropy is not a fate score: a high or low value is merely one feature. The same
 - Use a short rolling raw-event retention window, keep aggregate baselines separately, and disclose any first-party behavior telemetry in the site's privacy notice as appropriate.
 - Test legitimate heavy users, infinite scroll, article reading, keyboard/assistive navigation, search crawlers where permitted, distributed scraping, and recovery after load ceases.
 - Treat missing telemetry as unknown, not suspicious. Keep an explicit observe-only mode during rollout.
+
+
+## Runtime queue release policy
+
+The root `index.php` endpoint is a durable queue ingress. It validates the envelope and section destination, stores the request as `queued`, and returns HTTP 202 with an admission ACK. A 202 response does **not** mean the destination has served the request. Only a destination 2xx result recorded by the dispatcher changes a queue entry to `served`.
+
+The dispatcher releases a batch when either condition is true:
+
+- **Threshold:** queued count is at least `REDIST_WAVE_THRESHOLD` (default 10). Ingress checks this after each admission, so crossing the threshold triggers a release without waiting for the timer.
+- **Timer:** the oldest queued item has waited at least `REDIST_QUEUE_RELEASE_SECONDS` (default 5). This condition is checked by both ingress and the CLI worker.
+
+A real timer requires the worker to be scheduled independently of incoming traffic. Configure hosting cron to run:
+
+```sh
+php /absolute/path/to/Redist/bin/dispatch-queue.php
+```
+
+Run it at the cadence appropriate for the hosting scheduler. Standard cPanel cron generally has one-minute granularity, so with that scheduler the practical maximum timer delay is approximately one minute plus processing time, regardless of the 5-second age threshold. A continuously running worker can provide finer timer precision if the host supports supervised long-running processes.
+
+Only one wave proceeds at a time. A wave completes only when every member receives a 2xx response; transport errors and non-2xx responses are marked failed and the wave becomes blocked for review. A blocked wave is not silently treated as successful and requires operational reconciliation before subsequent waves proceed.
+
+Manifest example (replace the example hostname with a destination you own and intend to route through Redist):
+
+```json
+{
+  "version": 1,
+  "sections": {
+    "public": {
+      "target_origin": "https://www.example.com",
+      "description": "Public website"
+    }
+  }
+}
+```
+
+Do not use the example hostname as a production destination without replacing it.
