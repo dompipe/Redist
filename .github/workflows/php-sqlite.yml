@@ -31,3 +31,4 @@ jobs:
           php tests/sqlite_smoke.php
           php tests/section_health_smoke.php
           php tests/behavioral_intelligence_smoke.php
+          php tests/timing_pattern_smoke.php
