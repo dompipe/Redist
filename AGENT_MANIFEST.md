@@ -479,3 +479,11 @@ The dispatch ingress applies a soft priority penalty when one source address app
 
 The response from a newly admitted request includes `priority` and a small `ip_rate` summary. These fields are operational feedback, not an identity or abuse verdict.
 
+
+## Overwrite-protected atomic file creation
+
+Use `Redist\\files\\AtomicFile::writeOnce($destination, $contents, $logger, $mode)` when Redist needs to create a text/configuration artifact that must never replace an existing file. The helper writes to a temporary file in the destination directory, flushes it, applies the requested permissions, and uses an atomic hard-link install. If the destination already exists (including a symlink), it returns `already_exists` and leaves that destination unchanged. It never falls back to `rename()`, because rename can overwrite a destination on Unix.
+
+The result includes `ok`, `code`, `path`, `bytes`, and a safe diagnostic `message`. An optional logger callback receives `(level, event, context)`; file contents are never included. Logger failures are caught and do not change the write result. The default mode is `0600`; callers may request a narrower permission mode such as `0640` when another trusted process needs read access.
+
+The destination directory must already exist, be writable by the caller, be trusted against untrusted directory writers, and support hard links. The helper does not create directories, does not overwrite, and reports errors instead of silently falling back to a less-safe operation. This is an overwrite guard, not a substitute for directory ownership/permissions, signature verification, or safe path selection. The CI smoke test is `tests/atomic_file_smoke.php`.
