@@ -46,6 +46,7 @@ final class IpReputation {
         $key = hash_hmac('sha256', strtolower($ip), $secret);
         $ins = $db->prepare('INSERT INTO ip_request_events(ip_key,section_id,observed_at) VALUES(?,?,?)');
         $ins->execute([$key, $section, $now]);
+        $eventId = (int)$db->lastInsertId();
         $q = $db->prepare('SELECT COUNT(*) FROM ip_request_events WHERE ip_key=? AND observed_at>?');
         $q->execute([$key, $now - 60]);
         $count = (int)$q->fetchColumn();
@@ -53,7 +54,7 @@ final class IpReputation {
         $near = (int)ceil($threshold * self::ratio());
         $deferred = $count >= max(10, $near);
         // Bound storage; this cleanup is amortized and outside request hot paths.
-        if (($count % 100) === 0) {
+        if (($eventId % 500) === 0) {
             $db->prepare('DELETE FROM ip_request_events WHERE observed_at < ?')->execute([$now - 86400]);
         }
         return [
