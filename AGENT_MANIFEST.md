@@ -243,6 +243,29 @@ Before describing a deployment as ready for heavy traffic, test and report:
 
 A manifest alone cannot make a system high-traffic-ready. The implementation, storage engine, deployment topology, destination contract, and load tests must all support these invariants.
 
+
+## Section availability and downtime recording
+
+The runtime health recorder must distinguish observed failure from missing observations. **No traffic is unknown, not down.** Health may be derived from actual destination outcomes and/or explicitly configured authorized health probes; it must not be inferred from queue depth alone.
+
+### State model
+
+- `unknown`: there are no observations, observations are stale, or monitoring itself is unavailable.
+- `healthy`: a destination response in the HTTP 2xx range was observed recently.
+- `suspected_down`: failures are accumulating but the configured threshold has not been reached.
+- `down`: the configured consecutive-failure threshold has been reached and an incident is open.
+- `recovering`: successes have resumed but the configured recovery policy has not yet confirmed stability (when a multi-success recovery policy is enabled).
+
+A response is successful only when the destination returned an HTTP 2xx response and no transport error occurred. Record non-2xx status codes, timeouts, DNS/TLS/connect errors, and unknown outcomes distinctly. A single failure must not declare a section down. Thresholds and observation windows must be configurable per section; display the threshold used. If the site is idle, use an explicitly authorized health probe or show unknown rather than falsely declaring an outage.
+
+### Durable downtime recorder
+
+Persist response observations and incident transitions in the durable store, not process memory. Each incident records section/spoke ID, incident ID, start estimate, detection timestamp, last known 2xx, recovery timestamp, failure counts, response/error samples, and final duration. Keep a history of recovered incidents and leave an open incident visible until recovery is confirmed. Preserve monitoring gaps and recorder failures separately from destination failures. Use UTC timestamps and stable ordering. The operations dashboard should display each section's state, last 2xx, last observation, current incident duration, recent incident history, and queue/circuit-breaker context.
+
+Do not treat a response to a different section as proof of recovery. Recovery must be attributed to the same section and should follow the configured recovery threshold. Never silently delete downtime history; retention must be explicit and configurable.
+
+The current implementation's recorder API and schema must be wired to real dispatch outcomes before the dashboard can claim live health. Unit/smoke tests should cover no traffic, 2xx, threshold crossing, transport failures, recovery, persistent history, and separate section IDs. A standalone recorder that is not called by the dispatcher is not live monitoring.
+
 ## Wave policy
 
 The design target is **one active wave per section**, not one global wave for the entire site and not one wave for every individual page.
