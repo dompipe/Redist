@@ -17,7 +17,7 @@ if (PHP_SAPI !== 'cli') {
 
 $root = dirname(__DIR__, 2);
 $db = SqliteStore::db();
-$queuePath = $root . '/users.conf';
+$queuePath = $root . '/server_logs/users.conf';
 $userDir = $root . '/user_logs';
 $serverDir = $root . '/server_logs';
 $imported = ['queue' => 0, 'user_logs' => 0, 'server_logs' => 0];
