@@ -36,7 +36,8 @@ final class SectionHealthProbe {
         foreach ($sections as $id => $section) {
             if (!is_string($id) || !is_array($section)) continue;
             $status = SectionHealth::status($id);
-            if ($status['state'] !== 'unknown') continue;
+            // Probe unknown, suspected-down, and down sections periodically so recovery is detected.
+            if ($status['state'] === 'healthy') continue;
             $q = $db->prepare('SELECT last_probe_at FROM section_health_probes WHERE section_id=?');
             $q->execute([$id]);
             $last = $q->fetchColumn();
