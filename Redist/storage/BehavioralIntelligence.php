@@ -109,6 +109,128 @@ final class BehavioralIntelligence {
             'reasons'=>$reasons,'advisory_only'=>true];
     }
 
+    /**
+     * Record a timed click in a 4-second bitstream.
+     *
+     * One slot = 4 seconds; any click in a slot sets its bit to 1. Empty slots
+     * between observed clicks are filled with 0. The same trace row is updated
+     * while active, so the last event time acts as a moving end marker instead
+     * of creating one database row per click.
+     *
+     * Returns advisory view state only. It never challenges or blocks by itself.
+     */
+    public static function recordTimedClick(string $section, string $actor, ?int $timestamp = null, int $clickLimit12s = 6): array {
+        $section = strtolower(trim($section));
+        if (!preg_match('/^[a-z0-9][a-z0-9._:-]{0,159}$/', $section)) throw new RuntimeException('Invalid section ID.');
+        if (!preg_match('/^[a-f0-9]{64}$/', $actor)) throw new RuntimeException('Invalid actor key.');
+        $now = $timestamp ?? time();
+        $slot = intdiv($now, 4);
+        $limit = max(3, min(60, $clickLimit12s));
+        $db = SqliteStore::db(); self::schema($db);
+        $db->exec("CREATE TABLE IF NOT EXISTS behavior_click_traces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            section_id TEXT NOT NULL,
+            actor_key TEXT NOT NULL,
+            started_at INTEGER NOT NULL,
+            last_event_at INTEGER NOT NULL,
+            ended_at INTEGER,
+            first_slot INTEGER NOT NULL,
+            last_slot INTEGER NOT NULL,
+            bitstream TEXT NOT NULL,
+            click_count INTEGER NOT NULL DEFAULT 0,
+            recent_clicks TEXT NOT NULL DEFAULT '[]',
+            view_state TEXT NOT NULL DEFAULT 'observe',
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            UNIQUE(section_id, actor_key)
+        )");
+        $db->exec('CREATE INDEX IF NOT EXISTS idx_behavior_click_active ON behavior_click_traces(view_state,last_event_at)');
+        $db->beginTransaction();
+        try {
+            $q = $db->prepare('SELECT * FROM behavior_click_traces WHERE section_id=? AND actor_key=?');
+            $q->execute([$section,$actor]); $row = $q->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                $ins = $db->prepare("INSERT INTO behavior_click_traces(section_id,actor_key,started_at,last_event_at,first_slot,last_slot,bitstream,click_count,recent_clicks) VALUES(?,?,?,?,?,?,?,1,?)");
+                $ins->execute([$section,$actor,$now,$now,$slot,$slot,'1',json_encode([$now], JSON_THROW_ON_ERROR)]);
+                $bits = '1'; $start = $now; $count = 1; $recent = [$now];
+            } else {
+                $start = (int)$row['started_at'];
+                $bits = (string)$row['bitstream'];
+                $firstSlot = (int)$row['first_slot'];
+                $lastSlot = (int)$row['last_slot'];
+                // If a new session resumes after a long idle gap, close the old trace.
+                if ($now - (int)$row['last_event_at'] > 1800 || $slot < $lastSlot) {
+                    $db->prepare("UPDATE behavior_click_traces SET ended_at=last_event_at,view_state='ended' WHERE id=?")->execute([(int)$row['id']]);
+                    $ins = $db->prepare("INSERT INTO behavior_click_traces(section_id,actor_key,started_at,last_event_at,first_slot,last_slot,bitstream,click_count,recent_clicks) VALUES(?,?,?,?,?,?,?,1,?)");
+                    $ins->execute([$section,$actor,$now,$now,$slot,$slot,'1',json_encode([$now], JSON_THROW_ON_ERROR)]);
+                    $bits = '1'; $start = $now; $count = 1; $recent = [$now];
+                } else {
+                    $recent = json_decode((string)$row['recent_clicks'], true);
+                    if (!is_array($recent)) $recent = [];
+                    $recent = array_values(array_filter($recent, static fn($t) => is_numeric($t) && (int)$t > $now - 12));
+                    $recent[] = $now;
+                    $count = (int)$row['click_count'] + 1;
+                    $gap = $slot - $lastSlot;
+                    if ($gap > 0) {
+                        $bits .= str_repeat('0', min(1800, max(0, $gap - 1))) . '1';
+                        $lastSlot = $slot;
+                    } else {
+                        $bits[strlen($bits)-1] = '1';
+                    }
+                    $up = $db->prepare("UPDATE behavior_click_traces SET last_event_at=?,ended_at=NULL,last_slot=?,bitstream=?,click_count=?,recent_clicks=?,view_state=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?");
+                    $state = count($recent) >= $limit ? 'review' : 'observe';
+                    $up->execute([$now,$lastSlot,$bits,$count,json_encode($recent, JSON_THROW_ON_ERROR),$state,(int)$row['id']]);
+                }
+            }
+            if (!$db->inTransaction()) throw new RuntimeException('Click trace transaction was interrupted.');
+            // Newly created/restarted rows also need the current threshold state.
+            $recent = $recent ?? [$now];
+            $state = count($recent) >= $limit ? 'review' : 'observe';
+            $db->prepare("UPDATE behavior_click_traces SET view_state=?,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE section_id=? AND actor_key=?")->execute([$state,$section,$actor]);
+            $db->commit();
+            return ['section_id'=>$section,'started_at'=>$start,'last_event_at'=>$now,
+                'slot_seconds'=>4,'bitstream'=>$bits,'clicks_in_last_12_seconds'=>count($recent),
+                'click_limit_12_seconds'=>$limit,'view_state'=>$state,
+                'recommendation'=>$state==='review'?'review':'observe',
+                'note'=>'Review flag is advisory; do not challenge based on this signal alone.'];
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+
+    /** Close idle traces so the visualizer can show where activity stopped. */
+    public static function closeIdleClickTraces(int $idleSeconds = 1800): int {
+        $idleSeconds = max(60, min(86400, $idleSeconds));
+        $db = SqliteStore::db(); self::schema($db);
+        $db->exec("CREATE TABLE IF NOT EXISTS behavior_click_traces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, section_id TEXT NOT NULL, actor_key TEXT NOT NULL,
+            started_at INTEGER NOT NULL, last_event_at INTEGER NOT NULL, ended_at INTEGER,
+            first_slot INTEGER NOT NULL, last_slot INTEGER NOT NULL, bitstream TEXT NOT NULL,
+            click_count INTEGER NOT NULL DEFAULT 0, recent_clicks TEXT NOT NULL DEFAULT '[]',
+            view_state TEXT NOT NULL DEFAULT 'observe',
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            UNIQUE(section_id, actor_key)
+        )");
+        $q=$db->prepare("UPDATE behavior_click_traces SET ended_at=last_event_at,view_state='ended',updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ended_at IS NULL AND last_event_at < ?");
+        $q->execute([time()-$idleSeconds]); return $q->rowCount();
+    }
+
+    /** Return a bounded, C-sec-friendly trace list without exposing raw session tokens. */
+    public static function clickTraceRows(int $limit = 100): array {
+        $limit=max(1,min(500,$limit)); $db=SqliteStore::db(); self::schema($db);
+        $db->exec("CREATE TABLE IF NOT EXISTS behavior_click_traces (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, section_id TEXT NOT NULL, actor_key TEXT NOT NULL,
+            started_at INTEGER NOT NULL, last_event_at INTEGER NOT NULL, ended_at INTEGER,
+            first_slot INTEGER NOT NULL, last_slot INTEGER NOT NULL, bitstream TEXT NOT NULL,
+            click_count INTEGER NOT NULL DEFAULT 0, recent_clicks TEXT NOT NULL DEFAULT '[]',
+            view_state TEXT NOT NULL DEFAULT 'observe',
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            UNIQUE(section_id, actor_key)
+        )");
+        $q=$db->prepare('SELECT id,section_id,substr(actor_key,1,12) AS actor_ref,started_at,last_event_at,ended_at,bitstream,click_count,view_state FROM behavior_click_traces ORDER BY last_event_at DESC LIMIT '.$limit);
+        $q->execute(); return $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public static function prune(int $hours=168): int {
         $hours=max(1,min(8760,$hours)); $db=SqliteStore::db(); self::schema($db);
         $q=$db->prepare("DELETE FROM behavior_events WHERE observed_at < strftime('%Y-%m-%dT%H:%M:%fZ','now',?)");
