@@ -2,8 +2,9 @@
 
 namespace Redist\url;
 
-include 'puser.php';
-include 'static_url.php';
+require_once __DIR__ . '/puser.php';
+require_once __DIR__ . '/static_url.php';
+require_once dirname(__DIR__) . '/storage/SqliteStore.php';
 
 class pURL implements pUser {
 
@@ -152,7 +153,7 @@ class pURL implements pUser {
 
 	public static function update_queue() {
 		
-		self::$files->save_user_log(self::$request['session'][$_SERVER['HTTP_REFERER']]);
+		self::$files->save_user_log(self::$hash, self::$request);
 		\\Redist\\storage\\SqliteStore::replaceQueue(self::$users);
 	}
 
@@ -245,7 +246,7 @@ class pURL implements pUser {
 		
 		$host = self::$request['session'][$_SERVER['HTTP_REFERER']]['user_addr'];
 		self::disassemble_IP($host);
-		self::$files->get_user_queue();
+		self::$users = self::$files->get_user_queue();
 		self::$users[] = self::$request['session'][$_SERVER['HTTP_REFERER']];
 		self::patch_connection();
 	}
@@ -335,17 +336,15 @@ class pURL implements pUser {
 			if (self::relative_count() > 50) {
 				self::$files->save_user_log(self::$hash, self::$request);
 				array_unique(self::$users);
-				file_put_contents(self::$setup->path_server . "/users.conf", json_encode(self::$users));
+				\\Redist\\storage\\SqliteStore::replaceQueue(self::$users);
 				exit();
 			}
 		}
 		array_unique(self::$users);
 		if (self::$users[0] != self::$request['session'][$_SERVER['HTTP_REFERER']]) {
-			$y = file_get_contents(self::$setup->path_server . "/users.conf");
-			$x = json_decode($y);
+			 $x = self::$files->get_user_queue();
 			while ($x[0] != self::$request['session'][$_SERVER['HTTP_REFERER']] && time() - self::$timer < self::$delay) {
-				$y = file_get_contents(self::$setup->path_server . "/users.conf");
-				$x = json_decode($y);	
+				 $x = self::$files->get_user_queue();
 			}
 			self::$patch_connection();
 		}
@@ -363,10 +362,10 @@ class pURL implements pUser {
 			self::update_queue();
 		}
 		else if (isset(self::$request['session'][$_SERVER['HTTP_REFERER']])) {
-			self::$files->save_user_log($_SERVER['REMOTE_ADDR']);
+			self::$files->save_user_log(self::$hash, self::$request);
 			if (self::$users == null)
 				self::$users = [];
-			file_put_contents(self::$setup->path_server . "/users.conf", json_encode(self::$users));		
+			\\Redist\\storage\\SqliteStore::replaceQueue(self::$users);
 		}
 		if (isset($_SERVER['HTTP_REFERER']))
 			header('Location: ' . self::$opt_ssl . self::$request['session'][$_SERVER['HTTP_REFERER']]['data']['target_pg']);
