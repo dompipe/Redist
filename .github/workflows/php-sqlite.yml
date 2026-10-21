@@ -27,6 +27,7 @@ jobs:
           php -l Redist/files/filemngr.php
           php -l Redist/url/purl.php
           php -l dashboard.php
+          php -l index.php
       - name: SQLite smoke tests
         run: |
           php tests/sqlite_smoke.php
