@@ -159,7 +159,7 @@ final class SectionHealth {
                 $q->execute([$key,(string)$value]);
             }
             $db->commit();
-        } catch (\\Throwable $e) {
+        } catch (\Throwable $e) {
             if ($db->inTransaction()) $db->rollBack();
             throw $e;
         }
