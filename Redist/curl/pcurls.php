@@ -28,8 +28,6 @@
 
 namespace Redist\curl;
 
-include 'curl.php';
-include 'static_curls.php';
 
 interface pCurls {
 
